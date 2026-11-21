@@ -1,0 +1,220 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Spline Sans", ui-sans-serif, system-ui, sans-serif;
+  --color-canvas: #0e0e10;
+  --color-surface: #111;
+  --color-raised: #161618;
+  /* Prisma palette: neutral surfaces, colour lives in marks */
+  --color-iris: #9b8cff;
+  --color-lagoon: #3dd6c3;
+  --color-azure: #5cb8ff;
+  --color-coral: #ff7b8a;
+  --color-saffron: #f7c04a;
+  --color-orchid: #e58ad6;
+  /* solid greys for icons: lucide strokes take a colour, never an alpha */
+  --color-ink-2: #9d9d9f;
+  --color-ink-3: #78787b;
+  --color-ink-4: #58585b;
+  --color-on: #0e0e10;
+  --color-line: #2a2a2f;
+}
+
+:root {
+  color-scheme: dark;
+  background: var(--color-canvas);
+  color: var(--color-white);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+*:focus-visible:not(input, textarea, select) { outline: 2px solid var(--color-iris); outline-offset: 2px; border-radius: 8px; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgb(from var(--color-white) r g b / .12); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+.rise { animation: rise .22s cubic-bezier(.22, 1, .36, 1); }
+@media (prefers-reduced-motion: reduce) { .rise { animation: none; } * { transition: none !important; } }
+
+@keyframes pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.pop { animation: pop .14s cubic-bezier(.22, 1, .36, 1); }
+@media (prefers-reduced-motion: reduce) { .pop { animation: none; } }
+@keyframes fade { from { opacity: 0; } }
+.fade { animation: fade .12s ease-out; }
+
+/* Press feedback: fires tens of times a day, so fast and subtle. */
+.press { transition: transform .12s cubic-bezier(0.23, 1, 0.32, 1); }
+.press:active { transform: scale(.96); }
+
+/* Themes. Every colour in the app reads these tokens; `white` is the ink colour, so text-white/40 flips
+   to dark ink on the light themes. No attribute = Prisma. */
+[data-theme="abissal"] { --color-canvas: #061317; --color-surface: #0a1a1f; --color-raised: #0f232a; --color-white: #e4f4f2; --color-ink-2: #8fa9a8; --color-ink-3: #6a8584; --color-ink-4: #4b6261; --color-line: #1f3a40;
+  --color-iris: #3dd6c3; --color-lagoon: #6ee7a8; --color-azure: #5cb8ff; --color-coral: #ff8a80; --color-saffron: #f7c04a; --color-orchid: #b59cff; }
+[data-theme="brasa"] { --color-canvas: #130c0a; --color-surface: #1a110e; --color-raised: #231814; --color-white: #f7ebe5; --color-ink-2: #b19a90; --color-ink-3: #8a7369; --color-ink-4: #63524b; --color-line: #3a2a24;
+  --color-iris: #ff8a5c; --color-lagoon: #9fd67a; --color-azure: #7ab8e8; --color-coral: #ff5f6d; --color-saffron: #ffc14d; --color-orchid: #f08cb8; }
+[data-theme="musgo"] { --color-canvas: #0b110c; --color-surface: #101812; --color-raised: #162018; --color-white: #e9f1e4; --color-ink-2: #98a893; --color-ink-3: #738470; --color-ink-4: #536150; --color-line: #263428;
+  --color-iris: #a8dc6e; --color-lagoon: #4fd1a5; --color-azure: #7cc4d8; --color-coral: #ef8a6f; --color-saffron: #e8c45a; --color-orchid: #d99ac8; }
+[data-theme="meia-noite"] { --color-canvas: #0c0a19; --color-surface: #120f24; --color-raised: #19152f; --color-white: #eeeaff; --color-ink-2: #a39cc4; --color-ink-3: #7d76a0; --color-ink-4: #5a5478; --color-line: #2c2650;
+  --color-iris: #ff7eb6; --color-lagoon: #5fe0d0; --color-azure: #7aa8ff; --color-coral: #ff6f86; --color-saffron: #ffcf6b; --color-orchid: #c49bff; }
+
+/* Prisma restated so a swatch inside another theme still paints with it. */
+[data-theme="prisma"] { --color-canvas: #0e0e10; --color-surface: #111; --color-raised: #161618; --color-white: #fff; --color-ink-2: #9d9d9f; --color-ink-3: #78787b; --color-ink-4: #58585b; --color-line: #2a2a2f;
+  --color-iris: #9b8cff; --color-lagoon: #3dd6c3; --color-azure: #5cb8ff; --color-coral: #ff7b8a; --color-saffron: #f7c04a; --color-orchid: #e58ad6; }
+/* Light themes: deeper marks so they hold contrast on pale surfaces; ink on accents turns white. */
+[data-theme="nuvem"], [data-theme="menta"], [data-theme="pessego"], [data-theme="lavanda"], [data-theme="gelo"] {
+  color-scheme: light; --color-on: #fff; --vig: rgba(0, 0, 0, .05); --glow: rgba(255, 255, 255, .5);
+  --color-lagoon: #0e9483; --color-azure: #1f78d1; --color-coral: #dc3d55; --color-saffron: #b07d00; --color-orchid: #b4419c;
+}
+[data-theme="nuvem"] { --color-canvas: #e9ecf2; --color-surface: #f6f7fa; --color-raised: #fff; --color-white: #16181f; --color-ink-2: #5d6170; --color-ink-3: #7c8091; --color-ink-4: #a2a6b4; --color-line: #d5d9e2; --color-iris: #5b4cdb; }
+[data-theme="menta"] { --color-canvas: #e3f0ea; --color-surface: #f2f9f5; --color-raised: #fbfefc; --color-white: #10221b; --color-ink-2: #4f665c; --color-ink-3: #6f877c; --color-ink-4: #9bb0a6; --color-line: #c9ded4; --color-iris: #0d8a6f; }
+[data-theme="pessego"] { --color-canvas: #f6e7e2; --color-surface: #fdf4f1; --color-raised: #fffaf8; --color-white: #2a1518; --color-ink-2: #775a5c; --color-ink-3: #957578; --color-ink-4: #bba0a2; --color-line: #ecd3cd; --color-iris: #d4385a; }
+[data-theme="lavanda"] { --color-canvas: #ece6f6; --color-surface: #f7f4fc; --color-raised: #fdfcff; --color-white: #1c1530; --color-ink-2: #625a7a; --color-ink-3: #827a9a; --color-ink-4: #aaa3c0; --color-line: #dcd3ec; --color-iris: #8a3fd0; }
+[data-theme="gelo"] { --color-canvas: #e3ebf2; --color-surface: #f2f6fa; --color-raised: #fbfdff; --color-white: #0f1b28; --color-ink-2: #536274; --color-ink-3: #738396; --color-ink-4: #9eacbb; --color-line: #cfdbe6; --color-iris: #0f6fd6; }
+
+/* Backdrop art. `.bd` is the art (also used by the settings thumbnails), `.backdrop` pins it behind the app.
+   Colours come from the theme, so every background follows the chosen theme. */
+.backdrop { position: fixed; inset: 0; z-index: -1; }
+.bd {
+  overflow: hidden; pointer-events: none; isolation: isolate;
+  background:
+    radial-gradient(60% 50% at 8% 0%, var(--glow, rgba(255, 255, 255, .07)), transparent 70%),
+    radial-gradient(90% 80% at 100% 100%, var(--vig, rgba(0, 0, 0, .55)), transparent 60%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.06'/%3E%3C/svg%3E"),
+    var(--color-canvas);
+}
+.bd::before, .bd::after { content: ""; position: absolute; inset: 0; z-index: -1; }
+
+/* Prisma: white light split by a prism, diagonal from the top-left. */
+.bd[data-bg="prisma"]::before {
+  inset: -20% -10%;
+  background: linear-gradient(118deg, transparent 34%, var(--color-iris) 40%, var(--color-azure) 45%, var(--color-lagoon) 50%, var(--color-saffron) 55%, var(--color-coral) 60%, var(--color-orchid) 64%, transparent 72%);
+  opacity: .22; filter: blur(70px); transform: rotate(-4deg);
+}
+
+
+
+
+
+/* Nebulosa: scattered stars and a coloured cloud. */
+.bd[data-bg="nebulosa"]::before {
+  background:
+    radial-gradient(1px 1px at 20px 30px, var(--color-white), transparent),
+    radial-gradient(1px 1px at 90px 120px, var(--color-white), transparent),
+    radial-gradient(1.5px 1.5px at 150px 60px, var(--color-white), transparent),
+    radial-gradient(1px 1px at 60px 170px, var(--color-white), transparent),
+    radial-gradient(1px 1px at 180px 190px, var(--color-white), transparent);
+  background-size: 210px 210px; opacity: .45;
+}
+.bd[data-bg="nebulosa"]::after {
+  background:
+    radial-gradient(35% 30% at 70% 35%, var(--color-orchid), transparent 70%),
+    radial-gradient(30% 35% at 60% 55%, var(--color-iris), transparent 70%),
+    radial-gradient(25% 25% at 80% 60%, var(--color-azure), transparent 70%);
+  opacity: .25; filter: blur(40px);
+}
+
+
+
+/* Malha: a mesh of four soft colour pools. */
+.bd[data-bg="malha"]::before {
+  background:
+    radial-gradient(45% 45% at 10% 10%, var(--color-iris), transparent 70%),
+    radial-gradient(45% 45% at 90% 15%, var(--color-azure), transparent 70%),
+    radial-gradient(45% 45% at 85% 90%, var(--color-orchid), transparent 70%),
+    radial-gradient(45% 45% at 15% 85%, var(--color-lagoon), transparent 70%);
+  opacity: .22; filter: blur(30px);
+}
+
+/* Ondas: ripples spreading from the bottom-right corner. */
+.bd[data-bg="ondas"]::before {
+  background: repeating-radial-gradient(circle at 100% 100%, transparent 0 22px, var(--color-iris) 23px 24px);
+  opacity: .14; mask: radial-gradient(circle at 100% 100%, #000 10%, transparent 75%);
+}
+
+
+/* Floating glass card over the backdrop */
+.float {
+  background: color-mix(in srgb, var(--color-surface) 74%, transparent);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid rgb(from var(--color-white) r g b / .08);
+  box-shadow: inset 0 1px 0 rgb(from var(--color-white) r g b / .05), 0 32px 64px -32px rgba(0, 0, 0, .95);
+}
+
+.sidebar { background-image: radial-gradient(120% 40% at 0% 0%, rgb(from var(--color-iris) r g b / .08), transparent 70%); }
+
+/* Collapsible sidebar (desktop).
+   Choreography, one curve for everything spatial (--ease), three beats:
+   closing  - labels leave first (quick, blur + nudge left), then the rail contracts and the
+              add/search chrome melts away while the shape squares off;
+   opening  - the rail expands first, chrome returns mid-way, labels arrive last once there is
+              room, so text is never squeezed. */
+@media (min-width: 64rem) {
+  .sidebar {
+    --ease: cubic-bezier(.32, .72, 0, 1);
+    --dur: .42s;
+    transition: width var(--dur) var(--ease); overflow-x: hidden;
+  }
+  /* 60px rail - 2x12px padding = 36px: every row becomes a 36x36 square with its icon centred. */
+  .sidebar[data-mini] { width: 60px; }
+
+  /* Labels: enter late and soft, exit early and fast. */
+  .sidebar .lbl {
+    white-space: nowrap;
+    transition: opacity .24s ease-out .16s, filter .24s ease-out .16s, transform .32s var(--ease) .12s;
+  }
+  .sidebar[data-mini] .lbl {
+    opacity: 0; filter: blur(3px); transform: translateX(-6px); pointer-events: none;
+    transition-duration: .12s, .12s, .16s; transition-delay: 0s; transition-timing-function: ease-in;
+  }
+
+  /* Nav rows: hover colours stay snappy, padding rides the rail. */
+  .sidebar .ni {
+    transition: color .15s ease, background-color .15s ease, box-shadow .15s ease, padding var(--dur) var(--ease);
+  }
+  .sidebar[data-mini] .ni { padding-inline: 9.5px; }  /* (36 - 17) / 2 */
+
+  /* Add + search: pill -> rounded square, chrome cross-fades in the middle of the move. 18px is a
+     real half-height radius (rounded-full's 9999px would stay round until the last frame). */
+  .sidebar .ab, .sidebar .si {
+    border-radius: 18px;
+    transition:
+      border-radius var(--dur) var(--ease), padding var(--dur) var(--ease), margin var(--dur) var(--ease),
+      border-color .26s ease .1s, background-color .26s ease .1s, color .15s ease, transform .12s var(--ease);
+  }
+  .sidebar[data-mini] .ab, .sidebar[data-mini] .si {
+    border-radius: 10px; border-color: transparent; background-color: transparent;
+    transition-delay: 0s, 0s, 0s, .06s, .06s, 0s, 0s;
+  }
+  .sidebar[data-mini] .si { padding-inline: 9px; }    /* (36 - 2 border - 16) / 2 */
+  .sidebar[data-mini] .ab { margin-bottom: 4px; }
+  /* Once settled, hover in the rail is instant like the nav items. */
+  .sidebar[data-mini] .ab:hover, .sidebar[data-mini] .si:hover { background-color: rgb(from var(--color-white) r g b / .04); transition-delay: 0s; transition-duration: var(--dur), var(--dur), var(--dur), .15s, .15s, .15s, .12s; }
+  .sidebar[data-mini] .ab:active { background-color: rgb(from var(--color-white) r g b / .08); }
+
+  /* Toggle glyph: the two arrows cross-dissolve through a blur, timed to the rail. */
+  .sidebar .swap-out, .sidebar .swap-in { transition: opacity .26s ease, filter .26s ease, transform .32s var(--ease); }
+  .sidebar .swap-in, .sidebar[data-mini] .swap-out { opacity: 0; filter: blur(4px); transform: scale(.7); }
+  .sidebar[data-mini] .swap-in { opacity: 1; filter: none; transform: none; }
+
+  /* Projects header collapses to a thin divider so the list glides up into the freed space. */
+  .sidebar .ph { transition: height var(--dur) var(--ease), margin var(--dur) var(--ease), padding var(--dur) var(--ease); }
+  .sidebar[data-mini] .ph { height: 13px; margin-top: 10px; padding-top: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .sidebar *, .sidebar *::before { transition: none !important; }
+}
+
+/* Sticky-note slips: askew at rest, straighten when touched. */
+.slip { transform: rotate(var(--r)); transition: transform .2s cubic-bezier(.22, 1, .36, 1); }
+.slip:hover, .slip:focus-within { transform: rotate(0) translateY(-2px); }
+
+/* Photos: cover the viewport, then a wash of the theme canvas so the glass cards stay legible.
+   --img is set inline (full size on the app, a small thumb in the settings grid). */
+.bd[data-photo] { background: var(--img) center / cover no-repeat, var(--color-canvas); }
+.bd[data-photo]::before { background: linear-gradient(100deg, color-mix(in srgb, var(--color-canvas) 70%, transparent) 15%, color-mix(in srgb, var(--color-canvas) 25%, transparent) 70%); }
+
+/* Keycap for shortcut hints. */
+.kbd { display: inline-block; min-width: 1.5em; padding: 0 .4em; border-radius: 5px; border: 1px solid rgb(255 255 255 / .12); border-bottom-width: 2px; font-size: 11px; font-weight: 500; line-height: 1.6; color: rgb(255 255 255 / .75); text-align: center; }
