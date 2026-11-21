@@ -43,7 +43,7 @@ function usePomodoro() {
 }
 
 // ---------- pieces ----------
-function Card({ title, icon, color, i, action, className = '', children }: { title: string; icon: IconName; color: string; i: number; action?: ReactNode; className?: string; children: ReactNode }) {
+function Card({ title, icon, color, action, className = '', children }: { title: string; icon: IconName; color: string; i: number; action?: ReactNode; className?: string; children: ReactNode }) {
   return (
     <section className={`float rounded-[22px] p-4 ${className}`}>
       <header className="mb-4 flex items-center gap-2">
