@@ -6,6 +6,6 @@ import { AuthGate } from './auth'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AuthGate>{userId => <App key={userId} userId={userId} />}</AuthGate>
+    <AuthGate>{user => <App key={user.id} userId={user.id} email={user.email} />}</AuthGate>
   </StrictMode>,
 )

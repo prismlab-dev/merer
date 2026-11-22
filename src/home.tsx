@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { type Task, addDays, blockers, diffDays, fmtDay, fmtDuration, isDone, parseISO, span, today, WEEKDAYS } from './lib'
 import { TaskList, type Ctx } from './tasks'
-import { Icon, PALETTE, PRIORITY, tint, type IconName } from './ui'
+import { Icon, PALETTE, PRIORITY, projectIcon, tint, type IconName } from './ui'
 import { Header, type View } from './views'
 import { NotesWidget } from './notes'
+import { Chip } from './TaskDetail'
 
 // ---------- pomodoro: persisted so it keeps running while you navigate ----------
 const FOCUS = 25 * 60, BREAK = 5 * 60
@@ -141,18 +142,22 @@ export function HomeView({ ctx, go }: { ctx: Ctx; go: (v: View) => void }) {
   for (let d = doneToday ? t : addDays(t, -1); doneOn(d) > 0; d = addDays(d, -1)) streak++
 
   // Rule-based next actions, most pressing first.
-  const tips: { icon: IconName; color: string; text: string; id?: string; inbox?: boolean }[] = []
-  const worst = [...overdue].sort((a, b) => a.priority - b.priority)[0]
-  if (worst) tips.push({ icon: 'deadline', color: PALETTE.coral, text: `Resolva “${worst.title}”, está atrasada`, id: worst.id })
-  const first = planned.find(x => !blockers(x, state.tasks).length)
-  if (first) tips.push({ icon: 'timer', color: PALETTE.iris, text: `Comece um pomodoro em “${first.title}”`, id: first.id })
-  const stuck = open.find(x => blockers(x, state.tasks).length)
-  if (stuck) tips.push({ icon: 'lock', color: PALETTE.saffron, text: `Destrave “${blockers(stuck, state.tasks)[0].title}” para liberar “${stuck.title}”`, id: blockers(stuck, state.tasks)[0].id })
-  const soon = open.find(x => x.deadline && !late.has(x.id) && diffDays(t, x.deadline) <= 3 && !planned.includes(x))
-  if (soon) tips.push({ icon: 'deadline', color: PALETTE.azure, text: `Prazo de “${soon.title}” é ${fmtDay(soon.deadline!).toLowerCase()}`, id: soon.id })
+  // Each rule lists its tasks by priority (most urgent first), capped so one rule can't take over the card.
+  const byPrio = (xs: Task[]) => [...xs].sort((a, b) => a.priority - b.priority).slice(0, 3)
+  const tips: { icon: IconName; color: string; verb: string; why?: string; items?: { task: Task; note?: string; noteIcon?: IconName }[]; inbox?: boolean }[] = []
+  if (overdue.length) tips.push({ icon: 'late', color: PALETTE.coral, verb: 'Resolva', why: overdue.length > 1 ? `${overdue.length} tarefas passaram do dia` : 'passou do dia', items: byPrio(overdue).map(task => ({ task })) })
+  const free = planned.filter(x => !blockers(x, state.tasks).length)
+  if (free.length) tips.push({ icon: 'timer', color: PALETTE.iris, verb: 'Comece um pomodoro', why: 'prontas para começar hoje', items: byPrio(free).map(task => ({ task })) })
+  // Group blocked tasks under the task that blocks them.
+  const freed = new Map<string, Task[]>()
+  for (const x of open) for (const b of blockers(x, state.tasks)) freed.set(b.id, [...(freed.get(b.id) ?? []), x])
+  const blocking = state.tasks.filter(x => freed.has(x.id))
+  if (blocking.length) tips.push({ icon: 'lock', color: PALETTE.saffron, verb: 'Destrave', why: 'outras tarefas esperam por estas', items: byPrio(blocking).map(task => ({ task, noteIcon: 'unlock', note: freed.get(task.id)!.map(x => x.title).join(', ') })) })
+  const soon = open.filter(x => x.deadline && !late.has(x.id) && diffDays(t, x.deadline) <= 3 && !planned.includes(x))
+  if (soon.length) tips.push({ icon: 'deadline', color: PALETTE.azure, verb: 'Adiante', why: 'prazos nos próximos 3 dias', items: byPrio(soon).map(task => ({ task, noteIcon: 'deadline', note: fmtDay(task.deadline!) })) })
   const inbox = open.filter(x => x.projectId === 'inbox').length
-  if (inbox > 2) tips.push({ icon: 'inbox', color: PALETTE.azure, text: `Organize as ${inbox} tarefas da Entrada`, inbox: true })
-  if (!tips.length) tips.push({ icon: 'sparkle', color: PALETTE.lagoon, text: 'Tudo em dia. Planeje o dia de amanhã.' })
+  if (inbox > 2) tips.push({ icon: 'inbox', color: PALETTE.azure, verb: `Organize as ${inbox} tarefas da Entrada`, inbox: true })
+  if (!tips.length) tips.push({ icon: 'sparkle', color: PALETTE.lagoon, verb: 'Tudo em dia. Planeje o dia de amanhã.' })
 
   const h = new Date().getHours()
   const hello = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'
@@ -166,10 +171,10 @@ export function HomeView({ ctx, go }: { ctx: Ctx; go: (v: View) => void }) {
         <p className="mt-1 text-sm text-white/45">{d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}.</p>
       </header>
 
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,780px)_auto] lg:justify-between">
-        <div className="grid items-start gap-3 lg:order-2 lg:w-[340px] xl:w-auto xl:grid-cols-[240px_340px]">
+      <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,780px)_auto] lg:justify-between">
+        <div className="grid grid-cols-1 items-start gap-3 lg:order-2 lg:w-[340px] xl:w-auto xl:grid-cols-[240px_340px]">
         <NotesWidget ctx={ctx} onOpen={id => go({ kind: 'notes', focus: id })} />
-        <aside className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+        <aside className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
         <Card i={3} title="Produtividade" icon="trend" color={PALETTE.iris}>
           <div className="grid grid-cols-2 gap-2">
             <Stat label="Taxa da semana" color={PALETTE.lagoon} value={`${weekDone + weekOpen ? Math.round((weekDone / (weekDone + weekOpen)) * 100) : 0}%`} hint={`${weekDone} de ${weekDone + weekOpen}`} />
@@ -234,7 +239,7 @@ export function HomeView({ ctx, go }: { ctx: Ctx; go: (v: View) => void }) {
         </aside>
         </div>
 
-        <div className="grid gap-3 lg:order-1">
+        <div className="grid grid-cols-1 gap-3 lg:order-1">
         <DayLoad done={doneToday} planned={planned.length} late={overdue.length} minutes={minutes} onOpen={() => go({ kind: 'today' })} />
 
         {planned.length > 0 && (
@@ -245,7 +250,7 @@ export function HomeView({ ctx, go }: { ctx: Ctx; go: (v: View) => void }) {
         )}
 
         {overdue.length > 0 && (
-          <Card i={6} title={`Atrasadas · ${overdue.length}`} icon="deadline" color={PALETTE.coral}>
+          <Card i={6} title={`Atrasadas · ${overdue.length}`} icon="late" color={PALETTE.coral}>
             <div className="-mt-2"><TaskList tasks={overdue.slice(0, 5)} ctx={ctx} showProject /></div>
           </Card>
         )}
@@ -257,15 +262,37 @@ export function HomeView({ ctx, go }: { ctx: Ctx; go: (v: View) => void }) {
         )}
 
         <Card i={4} title="Próximas ações" icon="sparkle" color={PALETTE.saffron}>
-          <ul className="space-y-1">
-            {tips.slice(0, 4).map(tip => (
-              <li key={tip.text}>
-                <button type="button" disabled={!tip.id && !tip.inbox} onClick={() => tip.id ? ctx.open(tip.id) : go({ kind: 'project', id: 'inbox' })}
-                  className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2 text-left text-sm text-white/80 transition-colors hover:bg-white/[0.04] hover:text-white disabled:pointer-events-none">
-                  <span className="grid size-7 shrink-0 place-items-center rounded-lg" style={{ background: tint(tip.color, 14), color: tip.color }}><Icon name={tip.icon} className="size-3.5" /></span>
-                  <span className="flex-1">{tip.text}</span>
-                  <Icon name="chevron" className="size-4 text-white/25" />
+          <ul className="space-y-4">
+            {tips.map(tip => (
+              <li key={tip.verb}>
+                <button type="button" disabled={!tip.inbox} onClick={() => go({ kind: 'project', id: 'inbox' })}
+                  className="flex w-full items-center gap-2.5 rounded-[10px] text-left text-xs enabled:hover:text-white disabled:cursor-default">
+                  <span className="grid size-6 shrink-0 place-items-center rounded-lg" style={{ background: tint(tip.color, 14), color: tip.color }}><Icon name={tip.icon} className="size-3" /></span>
+                  <span className="flex flex-1 flex-wrap items-baseline gap-x-2.5"><span className="font-medium" style={{ color: tip.color }}>{tip.verb}</span>{tip.why && <span className="text-white/40">{tip.why}</span>}</span>
+                  {tip.inbox && <Icon name="chevron" className="size-4 text-white/25" />}
                 </button>
+                {!!tip.items?.length && (
+                  <ul className="mt-1.5 space-y-1 pl-[34px]">
+                    {tip.items.map(({ task, note, noteIcon }) => {
+                      const project = state.projects.find(p => p.id === task.projectId)
+                      return (
+                        <li key={task.id}>
+                          <button type="button" onClick={() => ctx.open(task.id)}
+                            className="flex w-full items-center gap-2.5 border-l-2 bg-white/[0.035] py-1.5 pr-2 pl-2.5 text-left transition-colors hover:bg-white/[0.07]"
+                            style={{ borderColor: PRIORITY[task.priority].color }}>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[14px] font-medium text-white">{task.title}</span>
+                              {note && <span className="flex items-center gap-1.5 text-xs text-white/40">{noteIcon && <Icon name={noteIcon} className="size-3 shrink-0" />}<span className="truncate">{note}</span></span>}
+                            </span>
+                            {project && <span className="shrink-0"><Chip quiet color={project.color} icon={projectIcon(project, false)}>{project.id === 'inbox' ? 'Caixa de entrada' : project.name}</Chip></span>}
+                            {task.durationMin ? <span className="shrink-0 text-xs text-white/35 tabular-nums">{task.durationMin} min</span> : null}
+                            <Icon name="chevron" className="size-4 shrink-0 text-white/25" />
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>

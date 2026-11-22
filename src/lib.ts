@@ -29,6 +29,7 @@ export interface Task {
   title: string
   description: string
   projectId: string
+  section?: string | null // id from Project.sections; unknown ids fall back to no section
   parentId: string | null
   priority: Priority
   tags: string[]
@@ -43,8 +44,11 @@ export interface Task {
   completions: number
 }
 
-export interface Project { id: string; name: string; color: string }
-export interface Person { id: string; name: string }
+// `team` is only set on the merged personal view, so rows can show where a delegated task comes from.
+// `members` (emails) only exists on team projects; missing = the whole team (projects made before it existed).
+export interface Project { id: string; name: string; color: string; team?: { id: string; name: string; color: string }; members?: string[]; sections?: { id: string; name: string }[]; board?: boolean }
+export const projectMembers = (p: Project, team: string[]) => p.members ?? team
+export interface Person { id: string; name: string; photo?: string }
 
 export interface Automation {
   id: string

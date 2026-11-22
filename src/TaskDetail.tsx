@@ -1,13 +1,13 @@
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import {
   type Priority, type Recurrence, type Status, type Task, type Unit, type When,
   IN_DAYS, WEEKDAYS, addDays, blockers, diffDays, fmtDay, fmtDuration, fmtRecurrence, isDone, occurrences, parseISO, progressOf, span, today, uid,
 } from './lib'
 import { GlyphButton, QuickAdd, TaskRow, type Ctx } from './tasks'
-import { Check, DateField, NumberField, Select, type DatePreset, Slider, TimeField } from './controls'
-import { Avatar, Field, Icon, PALETTE, priorityOptions, Segmented, btnGhost, btnPrimary, colorFor, inputCls, WhenLabel, type IconName } from './ui'
+import { Check, DateField, NumberField, Popover, Select, type DatePreset, Slider, TimeField } from './controls'
+import { Avatar, Field, Icon, PALETTE, StatusGlyph, projectIcon, priorityOptions, Segmented, btnGhost, btnPrimary, colorFor, inputCls, tint, WhenLabel, type IconName } from './ui'
 
-export function TaskDetail({ task, ctx, onClose }: { task: Task; ctx: Ctx; onClose: () => void }) {
+export function TaskDetail({ task, ctx, team, onClose }: { task: Task; ctx: Ctx; team?: { name: string; color: string }; onClose: () => void }) {
   const { state, dispatch } = ctx
   const set = (patch: Partial<Task>) => dispatch({ type: 'update', id: task.id, patch })
   const project = state.projects.find(p => p.id === task.projectId)
@@ -21,24 +21,24 @@ export function TaskDetail({ task, ctx, onClose }: { task: Task; ctx: Ctx; onClo
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const stats: [string, string][] = [
-    ['Status', task.status.kind === 'check' ? (task.status.done ? 'Concluída' : 'Aberta')
+  const stats: [string, IconName, string | null][] = [
+    ['Status', isDone(task.status) ? 'done' : 'progress', task.status.kind === 'check' ? (task.status.done ? 'Concluída' : 'Aberta')
       : task.status.kind === 'progress' ? `${task.status.value}%`
       : task.status.kind === 'subtasks' ? `${task.status.done}/${task.status.total}` : task.status.stages[task.status.current]],
-    ['Prazo em', task.deadline ? dayCount(diffDays(t, task.deadline)) : '—'],
-    ['Duração', task.durationMin ? fmtDuration(task.durationMin) : '—'],
-    task.recurrence ? ['Concluída', `${task.completions}×`] : ['Subtarefas', subs.length ? `${subs.filter(s => isDone(s.status)).length}/${subs.length}` : '—'],
+    ['Prazo em', 'deadline', task.deadline ? dayCount(diffDays(t, task.deadline)) : null],
+    ['Duração', 'duration', task.durationMin ? fmtDuration(task.durationMin) : null],
+    task.recurrence ? ['Concluída', 'repeat', `${task.completions}×`] : ['Subtarefas', 'subtasks', subs.length ? `${subs.filter(s => isDone(s.status)).length}/${subs.length}` : null],
   ]
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 px-3 py-[6vh] backdrop-blur-[2px]" onMouseDown={e => e.target === e.currentTarget && onClose()}>
       <div role="dialog" aria-modal="true" aria-label={task.title} className="rise w-full max-w-4xl rounded-2xl border border-white/[0.08] bg-surface text-white shadow-[0_24px_50px_-24px_rgba(0,0,0,0.9)]">
         <header className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3.5">
-          <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-white/45">
-            <span style={{ color: project?.color }}><Icon name={project?.id === 'inbox' ? 'inbox' : 'hash'} className="size-3.5" /></span>
-            {parent
-              ? <>Subtarefa de<button className="truncate text-white/70 hover:text-white" onClick={() => ctx.open(parent.id)}>{parent.title}</button></>
-              : project?.id === 'inbox' ? 'Tarefa na Caixa de entrada' : <>Tarefa em <span className="text-white/70">{project?.name}</span></>}
+          <span className="flex min-w-0 flex-1 items-center gap-2 text-xs text-white/45">
+            <StatusGlyph status={task.status} priority={task.priority} blocked={blockers(task, state.tasks).length > 0 && !isDone(task.status)} size={16} />
+            {parent ? 'Subtarefa de' : 'Tarefa de'}
+            {project && <Chip color={project.color} icon={projectIcon(project, !!team)}>{project.id === 'inbox' ? 'Caixa de entrada' : project.name}</Chip>}
+            {team && <>do<Chip color={team.color} icon="users">{team.name}</Chip></>}
           </span>
           <button type="button" aria-label="Fechar" onClick={onClose} className="grid size-8 place-items-center rounded-full border border-white/[0.1] text-white/60 hover:text-white">
             <Icon name="x" className="size-4" />
@@ -57,17 +57,7 @@ export function TaskDetail({ task, ctx, onClose }: { task: Task; ctx: Ctx; onClo
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {stats.map(([k, v]) => (
-                <div key={k} className="rounded-xl border border-white/[0.06] bg-raised px-3 py-2.5">
-                  <div className="text-[11px] font-medium tracking-wider text-white/40 uppercase">{k}</div>
-                  <div className="mt-1 truncate text-[15px] font-semibold tabular-nums">{v}</div>
-                </div>
-              ))}
-            </div>
-
             <StatusEditor status={task.status} onChange={status => set({ status })} />
-            {task.recurrence && task.when && <SeriesTable when={task.when} rec={task.recurrence} />}
 
             <Field label="Subtarefas" hint={subs.length ? `${subs.filter(s => isDone(s.status)).length} de ${subs.length}` : undefined}>
               <div className="rounded-xl border border-white/[0.06] px-3">
@@ -82,9 +72,13 @@ export function TaskDetail({ task, ctx, onClose }: { task: Task; ctx: Ctx; onClo
 
           <aside className="space-y-5 border-t border-white/[0.06] p-5 md:border-t-0 md:border-l">
             <Field label="Projeto">
-              <Select ariaLabel="Projeto" searchable value={task.projectId} onChange={projectId => set({ projectId })}
-                options={state.projects.map(p => ({ value: p.id, label: p.name, icon: p.id === 'inbox' ? 'inbox' : 'hash', color: p.color }))} />
+              <Select ariaLabel="Projeto" searchable value={task.projectId} onChange={projectId => set({ projectId, section: null })}
+                options={state.projects.map(p => ({ value: p.id, label: p.name, icon: projectIcon(p, !!team), color: p.color }))} />
             </Field>
+            {!!state.projects.find(p => p.id === task.projectId)?.sections?.length && <Field label="Seção">
+              <Select<string> ariaLabel="Seção" value={task.section ?? ''} onChange={s => set({ section: s || null })}
+                options={[{ value: '', label: 'Sem seção' }, ...state.projects.find(p => p.id === task.projectId)!.sections!.map(s => ({ value: s.id, label: s.name }))]} />
+            </Field>}
             <Field label="Prioridade">
               <Select<Priority> ariaLabel="Prioridade" value={task.priority} onChange={priority => set({ priority })}
                 options={priorityOptions} />
@@ -94,17 +88,26 @@ export function TaskDetail({ task, ctx, onClose }: { task: Task; ctx: Ctx; onClo
             <DurationEditor task={task} set={set} />
             <RecurrenceEditor task={task} set={set} />
             <Field label="Etiquetas">
-              <TagEditor tags={task.tags} all={[...new Set(state.tasks.flatMap(x => x.tags))]} onChange={tags => set({ tags })} />
+              <TagEditor tags={task.tags} all={[...new Set([...state.tasks.flatMap(x => x.tags), ...Object.keys(state.tagColors ?? {})])]} onChange={tags => set({ tags })} />
             </Field>
-            <Field label="Responsáveis">
+            {state.people.length > 0 && <Field label="Responsáveis">
               <Select<string> ariaLabel="Responsáveis" multi={task.assignees} icon="users" placeholder="Atribuir a…" searchable
                 options={state.people.map(p => ({ value: p.id, label: p.name, avatar: <Avatar person={p} size="size-5" bare /> }))}
                 onChange={id => set({ assignees: task.assignees.includes(id) ? task.assignees.filter(x => x !== id) : [...task.assignees, id] })} />
-            </Field>
+            </Field>}
           </aside>
         </div>
 
-        <footer className="flex justify-end border-t border-white/[0.06] px-5 py-3">
+        <footer className="flex items-center gap-4 border-t border-white/[0.06] px-5 py-3">
+          <dl className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+            {stats.map(([k, icon, v]) => (
+              <div key={k} title={k} className={`flex items-center gap-1.5 ${v ? 'text-white/70' : 'text-white/25'}`}
+                style={k === 'Prazo em' && task.deadline && diffDays(t, task.deadline) < 0 && !isDone(task.status) ? { color: PALETTE.coral } : undefined}>
+                <dt><Icon name={icon} className="size-3.5" /><span className="sr-only">{k}</span></dt>
+                <dd className="tabular-nums">{v ?? '—'}</dd>
+              </div>
+            ))}
+          </dl>
           <button type="button" className={btnGhost} onClick={() => { dispatch({ type: 'remove', id: task.id }); onClose() }}>
             <Icon name="trash" className="size-3.5" />Excluir
           </button>
@@ -294,9 +297,15 @@ function RecurrenceEditor({ task, set }: { task: Task; set: (p: Partial<Task>) =
   }
   const options = REPEAT_PRESETS.map(([value, label]) => ({ value, label, icon: 'repeat' as const, color: value === 'none' ? undefined : PALETTE.iris }))
   if (key === 'custom') options.push({ value: 'custom', label: fmtRecurrence({ ...r!, anchor: 'schedule', until: null }), icon: 'repeat', color: PALETTE.iris })
+  const [peek, setPeek] = useState(false)
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const unit = (u: Unit) => r!.every > 1 ? { day: 'dias', week: 'semanas', month: 'meses', year: 'anos' }[u] : { day: 'dia', week: 'semana', month: 'mês', year: 'ano' }[u]
   return (
-    <Field label="Repetir">
+    <Field label="Repetir" hint={r && task.when && <>
+      <button ref={setAnchor} type="button" aria-expanded={peek} onClick={() => setPeek(!peek)}
+        className="rounded-md px-1.5 py-0.5 text-[11px] text-white/45 hover:bg-white/[0.06] hover:text-white aria-expanded:bg-white/[0.06] aria-expanded:text-white">Próximas</button>
+      <Popover anchor={anchor} open={peek} onClose={() => setPeek(false)} width={300}><SeriesTable when={task.when} rec={r} /></Popover>
+    </>}>
       <Select<string> ariaLabel="Repetir" icon="repeat" value={key} onChange={pick} options={options} width={280}
         footer={() => r ? (
           <div className="space-y-2.5">
@@ -327,8 +336,8 @@ function RecurrenceEditor({ task, set }: { task: Task; set: (p: Partial<Task>) =
 function SeriesTable({ when, rec }: { when: When; rec: Recurrence }) {
   const occ = occurrences(when, rec, 6)
   return (
-    <Field label="Próximas ocorrências" hint={rec.anchor === 'completion' ? 'estimadas se concluir no dia' : fmtRecurrence(rec)}>
-      <div className="overflow-hidden rounded-xl border border-white/[0.06]">
+    <div>
+      <p className="px-3 pt-2.5 pb-2 text-xs text-white/50">Próximas ocorrências · {rec.anchor === 'completion' ? 'estimadas se concluir no dia' : fmtRecurrence(rec)}</p>
         <table className="w-full text-sm tabular-nums">
           <thead className="bg-raised text-left text-[11px] tracking-wider text-white/40 uppercase">
             <tr><th className="px-3 py-2 font-medium">#</th><th className="px-3 py-2 font-medium">Quando</th><th className="px-3 py-2 text-right font-medium">Em</th></tr>
@@ -343,8 +352,7 @@ function SeriesTable({ when, rec }: { when: When; rec: Recurrence }) {
             ))}
           </tbody>
         </table>
-      </div>
-    </Field>
+    </div>
   )
 }
 
@@ -427,5 +435,15 @@ function TaskAutomations({ task, ctx }: { task: Task; ctx: Ctx }) {
         </div>
       </div>
     </Field>
+  )
+}
+
+export function Chip({ color, icon, quiet, children }: { color: string; icon: IconName; quiet?: boolean; children: ReactNode }) {
+  return (
+    <span className={`flex min-w-0 items-center rounded-md text-white/85 ${quiet ? 'gap-1 px-1.5 text-[11px]' : 'gap-1.5 border px-2 py-0.5 font-medium'}`}
+      style={{ background: tint(color, 14), borderColor: tint(color, 40) }}>
+      <span className="shrink-0" style={{ color }}><Icon name={icon} className={quiet ? 'size-3' : 'size-3.5'} /></span>
+      <span className="truncate">{children}</span>
+    </span>
   )
 }

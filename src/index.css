@@ -73,6 +73,11 @@
 [data-theme="lavanda"] { --color-canvas: #ece6f6; --color-surface: #f7f4fc; --color-raised: #fdfcff; --color-white: #1c1530; --color-ink-2: #625a7a; --color-ink-3: #827a9a; --color-ink-4: #aaa3c0; --color-line: #dcd3ec; --color-iris: #8a3fd0; }
 [data-theme="gelo"] { --color-canvas: #e3ebf2; --color-surface: #f2f6fa; --color-raised: #fbfdff; --color-white: #0f1b28; --color-ink-2: #536274; --color-ink-3: #738396; --color-ink-4: #9eacbb; --color-line: #cfdbe6; --color-iris: #0f6fd6; }
 
+/* Page icon: the lighter side carries the glyph. Dark themes: tinted well, coloured icon; light themes
+   flip it so the well is the dark side: mostly-opaque colour, white icon. */
+.page-glyph { background: color-mix(in oklab, var(--c) 18%, transparent); color: var(--c); }
+:is([data-theme="nuvem"], [data-theme="menta"], [data-theme="pessego"], [data-theme="lavanda"], [data-theme="gelo"]) .page-glyph { background: color-mix(in oklab, var(--c) 70%, transparent); color: var(--color-on); }
+
 /* Backdrop art. `.bd` is the art (also used by the settings thumbnails), `.backdrop` pins it behind the app.
    Colours come from the theme, so every background follows the chosen theme. */
 .backdrop { position: fixed; inset: 0; z-index: -1; }
@@ -138,12 +143,11 @@
 .float {
   background: color-mix(in srgb, var(--color-surface) 74%, transparent);
   backdrop-filter: blur(22px) saturate(140%);
-  -webkit-backdrop-filter: blur(22px) saturate(140%);
   border: 1px solid rgb(from var(--color-white) r g b / .08);
   box-shadow: inset 0 1px 0 rgb(from var(--color-white) r g b / .05), 0 32px 64px -32px rgba(0, 0, 0, .95);
 }
 
-.sidebar { background-image: radial-gradient(120% 40% at 0% 0%, rgb(from var(--color-iris) r g b / .08), transparent 70%); }
+.sidebar, .pagebar { background-image: radial-gradient(120% 40% at 0% 0%, rgb(from var(--color-iris) r g b / .08), transparent 70%); }
 
 /* Collapsible sidebar (desktop).
    Choreography, one curve for everything spatial (--ease), three beats:

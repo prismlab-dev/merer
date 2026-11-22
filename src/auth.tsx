@@ -9,7 +9,7 @@ export const supabase = createClient(
   { db: { schema: 'prism' } },
 )
 
-export function AuthGate({ children }: { children: (userId: string) => ReactNode }) {
+export function AuthGate({ children }: { children: (user: { id: string; email: string }) => ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
@@ -17,7 +17,7 @@ export function AuthGate({ children }: { children: (userId: string) => ReactNode
     return () => data.subscription.unsubscribe()
   }, [])
   if (session === undefined) return null
-  return session ? <>{children(session.user.id)}</> : <Login />
+  return session ? <>{children({ id: session.user.id, email: session.user.email?.toLowerCase() ?? '' })}</> : <Login />
 }
 
 function Login() {

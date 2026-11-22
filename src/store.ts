@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { supabase } from './auth'
 import {
   type Automation, type Note, type Person, type Project, type Task,
@@ -11,6 +11,8 @@ export interface State {
   people: Person[]
   automations: Automation[]
   notes: Note[]
+  tagColors?: Record<string, string> // tags without an entry use colorFor's hash
+  sidebarOrder?: string[] // your own + team project ids as you arranged them in the sidebar; only yours
   toast: { id: string; text: string } | null
 }
 
@@ -19,7 +21,7 @@ export type Action =
   | { type: 'update'; id: string; patch: Partial<Task> }
   | { type: 'remove'; id: string }
   | { type: 'saveProject'; project: Project }
-  | { type: 'renameTag'; from: string; to: string }
+  | { type: 'renameTag'; from: string; to: string; color?: string }
   | { type: 'removeProject'; id: string }
   | { type: 'removeTag'; tag: string }
   | { type: 'saveAutomation'; automation: Automation }
@@ -27,6 +29,7 @@ export type Action =
   | { type: 'saveNote'; note: Note }
   | { type: 'removeNote'; id: string }
   | { type: 'reorder'; list: 'tasks' | 'projects'; from: string; to: string }
+  | { type: 'sidebarOrder'; ids: string[] }
   | { type: 'dismissToast' }
   | { type: 'replace'; state: State }
 
@@ -106,8 +109,11 @@ export function reducer(s: State, a: Action): State {
     }
     case 'renameTag': {
       const swap = (tags: string[]) => tags.includes(a.from) ? [...new Set(tags.map(g => (g === a.from ? a.to : g)))] : tags
+      const { [a.from]: old, ...tagColors } = s.tagColors ?? {}
+      const color = a.color ?? old
       return {
         ...s,
+        tagColors: color ? { ...tagColors, [a.to]: color } : tagColors,
         tasks: s.tasks.map(t => (t.tags.includes(a.from) ? { ...t, tags: swap(t.tags) } : t)),
         automations: s.automations.map(x => ({
           ...x,
@@ -130,6 +136,7 @@ export function reducer(s: State, a: Action): State {
     }
     case 'removeTag': return {
       ...s,
+      tagColors: Object.fromEntries(Object.entries(s.tagColors ?? {}).filter(([k]) => k !== a.tag)),
       tasks: s.tasks.map(t => (t.tags.includes(a.tag) ? { ...t, tags: t.tags.filter(g => g !== a.tag) } : t)),
       automations: s.automations
         .filter(x => !(x.trigger.kind === 'tag' && x.trigger.tag === a.tag))
@@ -152,14 +159,27 @@ export function reducer(s: State, a: Action): State {
       if (i < 0 || j < 0) return s
       const next = [...list]
       next.splice(j, 0, ...next.splice(i, 1))
-      return { ...s, [a.list]: next }
+      // Keep the sidebar in step when projects are reordered from the projects page.
+      const o = s.sidebarOrder, oi = o?.indexOf(a.from) ?? -1, oj = o?.indexOf(a.to) ?? -1
+      const sidebarOrder = o && oi >= 0 && oj >= 0 ? [...o] : o
+      if (sidebarOrder !== o) sidebarOrder!.splice(oj, 0, ...sidebarOrder!.splice(oi, 1))
+      return { ...s, [a.list]: next, ...(a.list === 'projects' && { sidebarOrder }) }
+    }
+    case 'sidebarOrder': {
+      // Own projects follow the same relative order, so the projects page matches the sidebar.
+      const rank = (id: string) => { const i = a.ids.indexOf(id); return i < 0 ? 1e9 : i }
+      return { ...s, sidebarOrder: a.ids, projects: [...s.projects].sort((x, y) => rank(x.id) - rank(y.id)) }
     }
     case 'dismissToast': return { ...s, toast: null }
     case 'replace': return a.state
   }
 }
 
-const withDefaults = (raw: Partial<State>): State => ({ ...seed(), notes: [], ...raw, toast: null })
+// Delegating only happens inside teams, so personal data drops any old example people and assignees.
+const withDefaults = (raw: Partial<State>): State => {
+  const s = { ...seed(), notes: [], ...raw, people: [], toast: null }
+  return { ...s, tasks: s.tasks.map(t => (t.assignees.length ? { ...t, assignees: [] } : t)) }
+}
 
 // Local cache per account renders instantly; Supabase (prism.state) is the source of truth.
 function load(key: string): State {
@@ -198,6 +218,89 @@ export function useStore(userId: string) {
   return [state, dispatch] as const
 }
 
+export interface Team { id: string; name: string; color: string; members: { email: string; role: 'owner' | 'member' }[]; data: State }
+interface TeamRow { id: string; name: string; color: string; data: Partial<State>; team_members: Team['members'] }
+
+const teamJson = (t: Team) => JSON.stringify({ tasks: t.data.tasks, projects: t.data.projects, automations: t.data.automations, tagColors: t.data.tagColors })
+type Profiles = Map<string, { name: string | null; photo: string | null }>
+const toTeam = (r: TeamRow, profiles: Profiles): Team => ({
+  id: r.id, name: r.name, color: r.color, members: r.team_members,
+  data: {
+    tasks: r.data.tasks ?? [], projects: r.data.projects ?? [], automations: r.data.automations ?? [], tagColors: r.data.tagColors, notes: [], toast: null,
+    people: r.team_members.map(m => {
+      const p = profiles.get(m.email)
+      return { id: m.email, name: p?.name || m.email.split('@')[0], photo: p?.photo ?? undefined }
+    }),
+  },
+})
+
+/** Teams the signed-in email belongs to. Each team's data runs through the same reducer as the personal space. */
+export function useTeams(me: string) {
+  const [teams, setTeams] = useState<Team[]>([])
+  const saved = useRef(new Map<string, string>())
+
+  const load = useCallback(async () => {
+    const [{ data, error }, who] = await Promise.all([
+      supabase.from('teams').select('id, name, color, data, team_members(email, role)').order('updated_at'),
+      supabase.rpc('member_profiles'), // name + photo from the Silus profile; see supabase/member_profiles.sql
+    ])
+    if (error) return console.error(error)
+    if (who.error) console.error(who.error)
+    const profiles: Profiles = new Map((who.data ?? []).map((p: { email: string; name: string | null; photo: string | null }) => [p.email, p]))
+    const fresh = (data as TeamRow[]).map(r => toTeam(r, profiles))
+    setTeams(cur => fresh.map(t => {
+      const local = cur.find(x => x.id === t.id)
+      // Unsaved local edits win over the echo of an older save.
+      if (local && teamJson(local) !== saved.current.get(t.id)) return { ...t, data: { ...t.data, ...local.data, people: t.data.people } }
+      saved.current.set(t.id, teamJson(t))
+      return t
+    }))
+  }, [])
+
+  useEffect(() => {
+    load()
+    const ch = supabase.channel('teams')
+      .on('postgres_changes', { event: '*', schema: 'prism', table: 'teams' }, load)
+      .on('postgres_changes', { event: '*', schema: 'prism', table: 'team_members' }, load)
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [load])
+
+  useEffect(() => {
+    const dirty = teams.filter(t => teamJson(t) !== saved.current.get(t.id))
+    if (!dirty.length) return
+    // ponytail: last-write-wins per team, move tasks to rows if two people edit the same team at once often
+    const id = setTimeout(() => dirty.forEach(t => {
+      const json = teamJson(t)
+      saved.current.set(t.id, json)
+      supabase.from('teams').update({ data: JSON.parse(json), updated_at: new Date().toISOString() }).eq('id', t.id)
+        .then(({ error }) => error && console.error(error))
+    }), 800)
+    return () => clearTimeout(id)
+  }, [teams])
+
+  const dispatchTeam = useCallback((id: string, a: Action) =>
+    setTeams(ts => ts.map(t => (t.id === id ? { ...t, data: reducer(t.data, a) } : t))), [])
+
+  const fail = (error: { message: string } | null) => { if (error) { alert(`Não foi possível salvar: ${error.message}`); return true } return false }
+  const api = {
+    create: async (name: string, color: string) => {
+      const { data, error } = await supabase.from('teams')
+        .insert({ name, color, data: { tasks: [], projects: [{ id: uid(), name: 'Geral', color }], automations: [] } }).select('id').single()
+      if (fail(error) || !data) return null
+      if (fail((await supabase.from('team_members').insert({ team_id: data.id, email: me, role: 'owner' })).error)) return null
+      await load()
+      return data.id as string
+    },
+    rename: async (id: string, name: string, color: string) => { if (!fail((await supabase.from('teams').update({ name, color }).eq('id', id)).error)) await load() },
+    invite: async (id: string, email: string) => { if (!fail((await supabase.from('team_members').insert({ team_id: id, email: email.trim().toLowerCase() })).error)) await load() },
+    removeMember: async (id: string, email: string) => { if (!fail((await supabase.from('team_members').delete().eq('team_id', id).eq('email', email)).error)) await load() },
+    remove: async (id: string) => { if (!fail((await supabase.from('teams').delete().eq('id', id)).error)) await load() },
+  }
+  return { teams, dispatchTeam, api }
+}
+export type TeamApi = ReturnType<typeof useTeams>['api']
+
 export function seed(): State {
   const t = today()
   const d = (n: number) => addDays(t, n)
@@ -207,24 +310,20 @@ export function seed(): State {
     { id: 'home', name: 'Casa', color: '#3dd6c3' },
     { id: 'personal', name: 'Pessoal', color: '#e58ad6' },
   ]
-  const people: Person[] = [
-    { id: 'me', name: 'Você' }, { id: 'ana', name: 'Ana Ribeiro' },
-    { id: 'bruno', name: 'Bruno Costa' }, { id: 'carla', name: 'Carla Mendes' },
-  ]
   const k = (p: Partial<Task> & { title: string; projectId: string; id: string }) => blankTask(p)
   const tasks: Task[] = [
-    k({ id: 'brief', title: 'Fechar briefing da landing', projectId: 'launch', priority: 1, tags: ['design'], assignees: ['me'],
+    k({ id: 'brief', title: 'Fechar briefing da landing', projectId: 'launch', priority: 1, tags: ['design'],
       when: { kind: 'time', date: t, time: '10:00' }, durationMin: 60, deadline: d(1),
       description: 'Público, proposta de valor e as três seções principais. Validar com a Ana antes de passar para o Bruno.' }),
-    k({ id: 'copy', title: 'Escrever textos da página inicial', projectId: 'launch', priority: 2, tags: ['conteúdo'], assignees: ['ana'],
+    k({ id: 'copy', title: 'Escrever textos da página inicial', projectId: 'launch', priority: 2, tags: ['conteúdo'],
       status: { kind: 'progress', value: 40 }, when: { kind: 'window', start: d(0), end: d(4) }, deadline: d(5), durationMin: 180, dependsOn: [] }),
-    k({ id: 'build', title: 'Implementar landing em produção', projectId: 'launch', priority: 2, tags: ['dev'], assignees: ['bruno'],
+    k({ id: 'build', title: 'Implementar landing em produção', projectId: 'launch', priority: 2, tags: ['dev'],
       status: { kind: 'stages', stages: ['A fazer', 'Em desenvolvimento', 'Em revisão', 'Publicado'], current: 0 },
       when: { kind: 'window', start: d(3), end: d(8) }, deadline: d(9), durationMin: 480, dependsOn: ['brief', 'copy'] }),
     k({ id: 'b1', title: 'Hero com prévia do app', projectId: 'launch', parentId: 'build' }),
     k({ id: 'b2', title: 'Seção de preços', projectId: 'launch', parentId: 'build' }),
     k({ id: 'b3', title: 'Formulário de lista de espera', projectId: 'launch', parentId: 'build', status: { kind: 'check', done: true } }),
-    k({ id: 'review', title: 'Revisão semanal do lançamento', projectId: 'launch', priority: 3, assignees: ['me', 'ana', 'bruno'],
+    k({ id: 'review', title: 'Revisão semanal do lançamento', projectId: 'launch', priority: 3,
       when: { kind: 'slot', date: d(1), from: '14:00', to: '15:00' }, durationMin: 60,
       recurrence: { every: 1, unit: 'week', weekdays: [], anchor: 'schedule', until: null } }),
     k({ id: 'rent', title: 'Pagar aluguel', projectId: 'home', priority: 1, tags: ['contas'],
@@ -239,7 +338,7 @@ export function seed(): State {
     k({ id: 'doctor', title: 'Marcar consulta de rotina', projectId: 'personal', priority: 2, tags: ['saúde'],
       when: { kind: 'window', start: d(1), end: d(6) }, deadline: d(14) }),
     k({ id: 'idea', title: 'Anotar ideias de integrações', projectId: 'inbox', description: 'Calendário, e-mail, Prism Finance.' }),
-    k({ id: 'receipt', title: 'Enviar comprovante para a contabilidade', projectId: 'inbox', tags: ['contas'], assignees: ['carla'],
+    k({ id: 'receipt', title: 'Enviar comprovante para a contabilidade', projectId: 'inbox', tags: ['contas'],
       dependsOn: ['rent'], when: { kind: 'date', date: d(1) } }),
   ]
   const automations: Automation[] = [
@@ -254,5 +353,5 @@ export function seed(): State {
     { id: 'n2', text: 'Senha do wi-fi da Casa: prisma2026', color: '#3dd6c3', pinned: true, updatedAt: at(20) },
     { id: 'n3', text: 'Perguntar à Carla se o comprovante precisa ir em PDF.', color: '#f7c04a', pinned: false, updatedAt: at(50) },
   ]
-  return { tasks, projects, people, automations, notes, toast: null }
+  return { tasks, projects, people: [], automations, notes, toast: null }
 }

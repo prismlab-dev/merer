@@ -1,17 +1,18 @@
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  Calendar, CalendarCheck, CalendarDays, CalendarRange, ChevronRight, Clock, Target, Hash, Hourglass, Inbox, Link2, ListFilter,
-  ListTree, Lock, Pencil, ChevronsUp, ChevronUp, ChevronDown, Equal, Menu, Plus, Repeat, Search, Tag, Trash2, User, Users, X, Zap, CircleDashed, CircleCheck, Timer, Play, Pause, RotateCcw, SkipForward, TrendingUp, Sparkles, House, Pyramid, ChevronsLeft, ChevronsRight, StickyNote, Pin, PinOff, Settings, type LucideIcon,
+  Calendar, CalendarCheck, ClockAlert, CalendarDays, CalendarRange, ChevronRight, Clock, Target, Hash, Hourglass, Inbox, Link2, ListFilter,
+  ListTree, Lock, LockOpen, Pencil, ChevronsUp, ChevronUp, ChevronDown, Equal, Menu, Plus, Repeat, Search, Tag, Trash2, User, Users, X, Zap, CircleDashed, CircleCheck, Timer, Play, Pause, RotateCcw, SkipForward, TrendingUp, Sparkles, House, Pyramid, ChevronsLeft, ChevronsRight, StickyNote, Pin, PinOff, Settings, EllipsisVertical, Ellipsis, SquaresUnite, Columns3, Rows3, type LucideIcon,
 } from 'lucide-react'
 import { Tip } from './controls'
 import { type Person, type Priority, type Status, type When, fmtDay, fmtWhen, isDone, progressOf } from './lib'
 
 const ICONS = {
-  inbox: Inbox, today: CalendarCheck, upcoming: CalendarDays, filter: ListFilter, bolt: Zap,
-  calendar: Calendar, clock: Clock, window: CalendarRange, deadline: Target, repeat: Repeat, duration: Hourglass,
+  inbox: Inbox, today: CalendarCheck, upcoming: CalendarDays, filter: ListFilter, more: EllipsisVertical, dots: Ellipsis, bolt: Zap,
+  calendar: Calendar, clock: Clock, window: CalendarRange, deadline: Target, late: ClockAlert, repeat: Repeat, duration: Hourglass,
   tag: Tag, link: Link2, plus: Plus, search: Search, x: X, trash: Trash2, edit: Pencil, menu: Menu, subtasks: ListTree,
-  hash: Hash, user: User, users: Users, chevron: ChevronRight, lock: Lock, progress: CircleDashed, done: CircleCheck, prioHighest: ChevronsUp, prioHigh: ChevronUp, prioMedium: Equal, prioLow: ChevronDown,
-  timer: Timer, play: Play, pause: Pause, reset: RotateCcw, skip: SkipForward, trend: TrendingUp, sparkle: Sparkles, home: House, panel: ChevronsLeft, panelOpen: ChevronsRight, note: StickyNote, pin: Pin, unpin: PinOff, settings: Settings,
+  hash: Hash, user: User, users: Users, chevron: ChevronRight, lock: Lock, unlock: LockOpen, progress: CircleDashed, done: CircleCheck, prioHighest: ChevronsUp, prioHigh: ChevronUp, prioMedium: Equal, prioLow: ChevronDown,
+  timer: Timer, play: Play, pause: Pause, reset: RotateCcw, skip: SkipForward, trend: TrendingUp, sparkle: Sparkles, home: House, panel: ChevronsLeft, panelOpen: ChevronsRight, note: StickyNote, pin: Pin, unpin: PinOff, settings: Settings, teamProject: SquaresUnite, board: Columns3, list: Rows3,
 } satisfies Record<string, LucideIcon>
 export type IconName = keyof typeof ICONS
 export function Icon({ name, className = 'size-4' }: { name: IconName; className?: string }) {
@@ -23,12 +24,19 @@ export function Logo() {
   return <Pyramid className="size-6 text-iris" strokeWidth={1.75} aria-hidden />
 }
 
+/** Inbox, team project (merged view sets `team`; inside a team pass inTeam) or plain project. */
+export const projectIcon = (p: { id: string; team?: unknown }, inTeam = false): IconName =>
+  p.id === 'inbox' ? 'inbox' : inTeam || p.team ? 'teamProject' : 'hash'
+
 export const PALETTE = {
   iris: 'var(--color-iris)', lagoon: 'var(--color-lagoon)', azure: 'var(--color-azure)', coral: 'var(--color-coral)', saffron: 'var(--color-saffron)', orchid: 'var(--color-orchid)',
 }
 export const PROJECT_COLORS = ['#e58ad6', '#9b8cff', '#5cb8ff', '#3dd6c3', '#f7c04a', '#ff7b8a']
-/** Stable palette colour for a free-form label (tags). */
-export const colorFor = (s: string) => PROJECT_COLORS[[...s].reduce((h, c) => h + c.charCodeAt(0), 0) % PROJECT_COLORS.length]
+// ponytail: module-level map set by App each render; move to context if tags ever render outside App
+let tagColors: Record<string, string> = {}
+export const setTagColors = (m: Record<string, string>) => { tagColors = m }
+/** Colour for a tag: the one picked by the user, else a stable palette hash. */
+export const colorFor = (s: string) => tagColors[s] ?? PROJECT_COLORS[[...s].reduce((h, c) => h + c.charCodeAt(0), 0) % PROJECT_COLORS.length]
 export const tint = (c: string, pct = 14) => `color-mix(in oklab, ${c} ${pct}%, transparent)`
 
 // Jira-style: double chevron up = highest, down = lowest.
@@ -39,7 +47,7 @@ export const PRIORITY: Record<Priority, { color: string; label: string; icon: Ic
   4: { color: 'rgb(from var(--color-white) r g b / .45)', label: 'Baixa', icon: 'prioLow' },
 }
 export const priorityOptions = ([1, 2, 3, 4] as Priority[]).map(p => ({ value: p, label: PRIORITY[p].label, icon: PRIORITY[p].icon, color: PRIORITY[p].color }))
-const DONE = PALETTE.lagoon
+const DONE = PALETTE.iris
 
 /**
  * The checkbox slot. Its shape tells the status type:
@@ -73,7 +81,7 @@ export function StatusGlyph({ status, priority, blocked, size = 20 }: { status: 
     const v = progressOf(status)
     body = <>
       {ring(`${C} 0`, 0, 'rgb(from var(--color-white) r g b / .1)')}
-      {ring(`${C * v} ${C}`, 0, priority === 4 ? PALETTE.iris : c)}
+      {ring(`${C * v} ${C}`, 0, status.kind === 'subtasks' || priority === 4 ? PALETTE.iris : c)}
     </>
   } else {
     const n = status.stages.length - 1 // first stage is "not started"
@@ -87,7 +95,9 @@ export function StatusGlyph({ status, priority, blocked, size = 20 }: { status: 
 export function Avatar({ person, size = 'size-5', bare }: { person: Person; size?: string; bare?: boolean }) {
   const initials = person.name.split(' ').map(w => w[0]).slice(0, 2).join('')
   const hue = [...person.id].reduce((h, ch) => h + ch.charCodeAt(0) * 37, 0) % 360
-  const face = (
+  const face = person.photo ? (
+    <img src={person.photo} alt="" referrerPolicy="no-referrer" className={`${size} shrink-0 rounded-full object-cover ring-2 ring-canvas`} />
+  ) : (
     <span className={`${size} inline-grid shrink-0 place-items-center rounded-full text-[9px] font-semibold ring-2 ring-canvas`}
       style={{ background: `oklch(0.42 0.08 ${hue})`, color: `oklch(0.92 0.05 ${hue})` }}>
       {initials}
@@ -101,9 +111,10 @@ export function Meta({ icon, children, tone = 'muted', title, color }: { icon?: 
     muted: 'text-ink-3', rose: 'text-coral', amber: 'text-saffron', sky: 'text-azure', emerald: 'text-lagoon',
   }
   const body = (
-    <span className={`inline-flex items-center gap-1 text-xs tabular-nums ${tones[tone]}`}>
-      {icon && <span style={{ color }}><Icon name={icon} className="size-3.5" /></span>}
-      {children}
+    <span className={`inline-flex min-w-0 max-w-full items-center gap-1 text-xs whitespace-nowrap tabular-nums ${tones[tone]}`}>
+      {icon && <span className="shrink-0" style={{ color }}><Icon name={icon} className="size-3.5" /></span>}
+      {/* flex, not truncate: icons inside (e.g. repeat) are display:block and would drop to their own line. */}
+      <span className="flex min-w-0 items-center">{children}</span>
     </span>
   )
   return title ? <Tip label={title}>{body}</Tip> : body
@@ -155,7 +166,8 @@ export const btnTool = 'inline-flex items-center gap-1.5 rounded-full px-3 py-1.
 export const btnGhost = 'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm text-white/60 hover:bg-white/[0.06] hover:text-white'
 
 export function Dialog({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer: ReactNode }) {
-  return (
+  // Portal so a transformed/clipped ancestor can't trap the fixed overlay.
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/60 px-3 pt-[16vh] backdrop-blur-[2px]"
       onMouseDown={e => e.target === e.currentTarget && onClose()} onKeyDown={e => e.key === 'Escape' && onClose()}>
       <div role="dialog" aria-modal="true" aria-label={title} className="rise w-full max-w-md rounded-2xl border border-white/[0.08] bg-surface shadow-[0_24px_50px_-24px_rgba(0,0,0,0.9)]">
@@ -166,6 +178,7 @@ export function Dialog({ title, onClose, children, footer }: { title: string; on
         <div className="space-y-4 px-5 py-4">{children}</div>
         <footer className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-3">{footer}</footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
