@@ -179,7 +179,7 @@ const hslHex = (h: number, s: number, l: number) => {
   return `#${f(0)}${f(8)}${f(4)}`
 }
 
-export function ColorField({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+export function ColorField({ value, onChange, ariaLabel = 'Cor do projeto' }: { value: string; onChange: (hex: string) => void; ariaLabel?: string }) {
   const known = COLOR_OPTIONS.find(c => c.hex === value)
   const [hue, setHue] = useState(250)
   const [light, setLight] = useState(70)
@@ -189,7 +189,7 @@ export function ColorField({ value, onChange }: { value: string; onChange: (hex:
     ...(known ? [] : [{ value, label: `Personalizada ${value}`, swatch: value }]),
   ]
   return (
-    <Select value={value} options={options} onChange={onChange} ariaLabel="Cor do projeto" searchable={false} width={280}
+    <Select value={value} options={options} onChange={onChange} ariaLabel={ariaLabel} searchable={false} width={280}
       footer={close => (
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs text-white/45">

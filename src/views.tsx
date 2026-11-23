@@ -1,8 +1,9 @@
 import { createContext, useContext, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  type Automation, type Priority, type Task, IN_DAYS, projectMembers, addDays, iso, blockers, diffDays, fmtDay, fmtDuration, isDone, moveWhen, parseISO, progressOf, span, today, uid, WEEKDAYS,
+  type Automation, type Priority, type Task, IN_DAYS, projections, projectMembers, addDays, iso, blockers, diffDays, fmtDay, fmtDuration, isDone, moveWhen, parseISO, progressOf, span, today, uid, viewTasks, WEEKDAYS,
 } from './lib'
+import { describeView, viewColor } from './viewText'
 import { QuickAdd, QuickAddModal, SortableTask, TaskList, TaskRow, type Ctx } from './tasks'
 import { Board, Drop, Kanban, KanbanCol, Sortable, useDrag, useRow } from './sortable'
 import { Check, DateField, Popover, Select, Tip } from './controls'
@@ -12,7 +13,7 @@ export type TeamTab = 'tasks' | 'projects' | 'filters' | 'tags' | 'automations' 
 // `team` scopes a project/tag/filter/search page to that team's data.
 export type View = (
   | { kind: 'home' } | { kind: 'today' } | { kind: 'upcoming' } | { kind: 'filters' } | { kind: 'tags' } | { kind: 'automations' } | { kind: 'projects' } | { kind: 'teams' } | { kind: 'notes'; focus?: string } | { kind: 'pomodoro' }
-  | { kind: 'project'; id: string } | { kind: 'tag'; tag: string } | { kind: 'filter'; id: FilterId } | { kind: 'search'; q: string } | { kind: 'team'; id: string; tab?: TeamTab }
+  | { kind: 'project'; id: string } | { kind: 'tag'; tag: string } | { kind: 'filter'; id: FilterId } | { kind: 'view'; id: string } | { kind: 'search'; q: string } | { kind: 'team'; id: string; tab?: TeamTab }
 ) & { team?: string }
 
 export type FilterId = 'blocked' | 'moving' | 'deadline' | 'recurring' | 'done'
@@ -144,6 +145,28 @@ function Day({ ctx, date, isToday, count, children }: { ctx: Ctx; date: string; 
   )
 }
 
+/** A projected repeat: the task as it will come back, faded; opens the real one. */
+export function Ghost({ task, ctx, children }: { task: Task; ctx: Ctx; children: ReactNode }) {
+  return (
+    <div role="button" tabIndex={0} title="Próxima repetição (projeção)" aria-label={`${task.title}, próxima repetição`}
+      onClick={() => ctx.open(task.ghostOf!)} onKeyDown={e => e.key === 'Enter' && ctx.open(task.ghostOf!)}
+      className="cursor-pointer rounded-lg opacity-40 [mask-image:linear-gradient(90deg,#000_70%,transparent)] transition-opacity hover:opacity-70 focus-visible:opacity-70 focus-visible:outline-2 focus-visible:outline-iris">
+      <div inert className="pointer-events-none">{children}</div>
+    </div>
+  )
+}
+
+/** Header button that turns projected repeats on or off. */
+export function GhostToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  const label = on ? 'Ocultar próximas repetições' : 'Mostrar próximas repetições'
+  return (
+    <Tip label={label}><button type="button" aria-pressed={on} aria-label={label} onClick={() => onChange(!on)}
+      className={`grid size-8 place-items-center rounded-[10px] transition-colors hover:bg-white/[0.07] ${on ? 'text-iris' : 'text-ink-2 hover:text-white'}`}>
+      <Icon name="repeat" className="size-[17px]" />
+    </button></Tip>
+  )
+}
+
 type Span = 'week' | 'month' | 'custom'
 const weekOf = (d: string): [string, string] => { const s = addDays(d, -((parseISO(d).getDay() + 6) % 7)); return [s, addDays(s, 6)] }
 const monthOf = (d: string): [string, string] => { const x = parseISO(d); return [iso(new Date(x.getFullYear(), x.getMonth(), 1)), iso(new Date(x.getFullYear(), x.getMonth() + 1, 0))] }
@@ -169,6 +192,10 @@ export function UpcomingView({ ctx }: { ctx: Ctx }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [menu, setMenu] = useState(false)
   const [board, setBoard] = useState(() => { try { return localStorage.getItem('upcoming-board') === '1' } catch { return false } })
+  const [ghosts, setGhosts] = useState(() => { try { return localStorage.getItem('upcoming-ghosts') === '1' } catch { return false } })
+  const toggleGhosts = (on: boolean) => { setGhosts(on); try { localStorage.setItem('upcoming-ghosts', on ? '1' : '0') } catch { /* private mode */ } }
+  const ghostList = ghosts ? projections(roots) : []
+  const ghostsOn = (d: string) => ghostList.filter(x => span(x.when!)[0] === d).sort(byTime)
   const toggleBoard = () => setBoard(b => { try { localStorage.setItem('upcoming-board', b ? '0' : '1') } catch { /* private mode */ } return !b })
   const goToday = () => setRange(mode === 'month' ? monthOf(t) : mode === 'week' ? weekOf(t) : [t, addDays(t, diffDays(range[0], range[1]))])
   const nav = 'grid size-7 place-items-center rounded-full text-white/55 hover:bg-white/[0.07] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-iris'
@@ -204,6 +231,7 @@ export function UpcomingView({ ctx }: { ctx: Ctx }) {
   return (
     <>
       <Header title="Em breve" icon="upcoming" color={PALETTE.iris} sub={control}>
+        <GhostToggle on={ghosts} onChange={toggleGhosts} />
         <button type="button" aria-pressed={board} aria-label={board ? 'Ver em lista' : 'Ver em colunas'} title={board ? 'Ver em lista' : 'Ver em colunas'} onClick={toggleBoard}
           className="grid size-8 place-items-center rounded-[10px] text-ink-2 transition-colors hover:bg-white/[0.07] hover:text-white">
           <Icon name={board ? 'list' : 'board'} className="size-[17px]" />
@@ -211,7 +239,7 @@ export function UpcomingView({ ctx }: { ctx: Ctx }) {
       </Header>
       {(() => {
         const dayList = (d: string) => roots.filter(x => x.when!.kind !== 'window' ? span(x.when!)[0] === d : span(x.when!)[0] === d || (d === t && span(x.when!)[0] < t)).sort(byTime)
-        // Past days fold into one "Atrasadas" lane that's always shown; windows still running sit on today instead.
+        // Past days fold into one "Atrasadas" lane, hidden while empty; windows still running sit on today instead.
         const late = roots.filter(x => x.when!.kind !== 'window' && span(x.when!)[0] < t).sort(byTime)
         const shown = days.filter(d => d >= t).map(d => [d, dayList(d)] as const)
         const moveTo = (id: string, d: string) => {
@@ -221,7 +249,7 @@ export function UpcomingView({ ctx }: { ctx: Ctx }) {
         }
         // Same lanes as a project's board view, one per day; order inside a day stays by time.
         if (board) return (
-          <Kanban cols={Object.fromEntries([['late', late.map(x => x.id)], ...shown.map(([d, l]) => [d, l.map(x => x.id)])])} onColDrop={() => {}} onDrop={(id, d) => moveTo(id, d)}
+          <Kanban cols={Object.fromEntries([...(late.length ? [['late', late.map(x => x.id)] as const] : []), ...shown.map(([d, l]) => [d, l.map(x => x.id)] as const)])} onColDrop={() => {}} onDrop={(id, d) => moveTo(id, d)}
             overlay={id => { const x = roots.find(r => r.id === id); return x && <div className="float cursor-grabbing overflow-hidden rounded-2xl py-0.5 rotate-[1.5deg] shadow-[0_24px_48px_-18px_rgba(0,0,0,.95)] ring-1 ring-iris/40"><TaskRow task={x} ctx={ctx} showProject /></div> }}>
             {(cols, over) => (
             <div className="board -mx-3 flex min-h-[60vh] flex-1 snap-x items-stretch gap-4 overflow-x-auto px-3 pb-4 scroll-px-3 sm:-mx-5 sm:px-5 sm:scroll-px-5 lg:-mr-9 lg:-ml-8 lg:pr-9 lg:pl-8 lg:scroll-pl-8">
@@ -238,6 +266,7 @@ export function UpcomingView({ ctx }: { ctx: Ctx }) {
                       <KanbanCol id={d} ids={cols[d]}>
                         {col.length > 0 && <div className="space-y-1 pt-3">{col.map(x => <SortableTask key={x.id} task={x} ctx={ctx} showProject card />)}</div>}
                       </KanbanCol>
+                      {d !== 'late' && ghostsOn(d).map(x => <div key={x.id} className="pt-1"><Ghost task={x} ctx={ctx}><div className="float overflow-hidden rounded-2xl py-0.5"><TaskRow task={x} ctx={ctx} showProject /></div></Ghost></div>)}
                       {d !== 'late' && <div className="transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/col:opacity-100 [@media(hover:hover)]:focus-within:opacity-100">
                         <QuickAdd ctx={ctx} date={d} />
                       </div>}
@@ -251,16 +280,17 @@ export function UpcomingView({ ctx }: { ctx: Ctx }) {
         )
         return (
           <Board onDrop={moveTo}>
-            <section className="mb-5">
+            {late.length > 0 && <section className="mb-5">
               <h2 className="flex items-center gap-2 border-b border-white/[0.08] pb-2 text-sm font-semibold text-coral">
-                Atrasadas{late.length > 0 && <span className="text-xs font-normal text-white/35 tabular-nums">{late.length}</span>}
+                Atrasadas<span className="text-xs font-normal text-white/35 tabular-nums">{late.length}</span>
               </h2>
-              {late.length > 0 ? <TaskList tasks={late} ctx={ctx} showProject draggable /> : <p className="pt-2 text-xs text-white/40">Nada atrasado.</p>}
-            </section>
+              <TaskList tasks={late} ctx={ctx} showProject draggable />
+            </section>}
             {shown.map(([d, list]) => (
               <Drop key={d} id={d}>
                 <Day ctx={ctx} date={d} isToday={d === t} count={list.length}>
                   {list.length > 0 && <TaskList tasks={list} ctx={ctx} showProject draggable />}
+                  {ghostsOn(d).map(x => <Ghost key={x.id} task={x} ctx={ctx}><TaskRow task={x} ctx={ctx} showProject /></Ghost>)}
                 </Day>
               </Drop>
             ))}
@@ -502,12 +532,28 @@ const linkRow = (label: string, count: number, onClick: () => void, icon: IconNa
   </button>
 )
 
-/** Saved views: the built-in filters, plus one per person inside a team. */
-export function FiltersView({ ctx, go }: { ctx: Ctx; go: (v: View) => void }) {
+/** Saved views, then the built-in filters, plus one per person inside a team. `wide`: what saved views search. */
+export function FiltersView({ ctx, wide = ctx, go }: { ctx: Ctx; wide?: Ctx; go: (v: View) => void }) {
   const all = ctx.state.tasks
+  const views = ctx.state.views ?? []
   return (
     <>
-      <Header title="Visualizações" icon="filter" color={PALETTE.coral} />
+      <Header title="Visualizações" icon="filter" color={PALETTE.coral}>
+        <button type="button" className={btnPrimary} onClick={() => go({ kind: 'view', id: 'new' })}><Icon name="plus" className="size-3.5" />Nova visualização</button>
+      </Header>
+      <div className="mb-10"><Group title={wide.wide ? 'Minhas visualizações' : 'Visualizações do time'} count={views.length || undefined}>
+        {views.map(v => (
+          <button key={v.id} type="button" onClick={() => go({ kind: 'view', id: v.id })} className="flex w-full items-center gap-3 border-b border-white/[0.06] py-2.5 text-left text-sm hover:bg-white/[0.015]">
+            <span style={{ color: viewColor(v, wide.state) }}><Icon name={v.layout} /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-white/85">{v.name}</span>
+              <span className="block truncate text-xs text-white/40">{describeView(v, wide.state)}</span>
+            </span>
+            <span className="text-xs text-white/35 tabular-nums">{viewTasks(v, wide.state.tasks).length}</span>
+          </button>
+        ))}
+        {!views.length && <p className="py-4 text-sm text-white/45">Combine projeto, pessoa, etiquetas e layout, e salve para abrir com um clique.{!wide.wide && ' Todo o time vê as visualizações criadas aqui.'}</p>}
+      </Group></div>
       <div className="grid gap-x-8 md:grid-cols-2 md:[&>section]:mt-0!">
       <Group title="Filtros">{(Object.keys(FILTERS) as FilterId[]).map(id => linkRow(FILTERS[id].label, all.filter(t => FILTERS[id].test(t, all)).length, () => go({ kind: 'filter', id }), FILTERS[id].icon, FILTERS[id].color))}</Group>
       {ctx.state.people.length > 0 && <Group title="Pessoas">{ctx.state.people.map(p => linkRow(p.name, open(all).filter(t => t.assignees.includes(p.id)).length, () => go({ kind: 'search', q: '+' + p.id }), <Avatar person={p} size="size-4" bare />, PALETTE.orchid))}</Group>}

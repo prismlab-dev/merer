@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { supabase } from './auth'
 import {
-  type Automation, type Note, type Person, type Project, type Task,
+  type Automation, type Note, type Person, type Project, type SavedView, type Task,
   addDays, blankTask, diffDays, isDone, matches, moveWhen, nextDate, resetStatus, span, today, uid,
 } from './lib'
 
@@ -12,6 +12,7 @@ export interface State {
   automations: Automation[]
   notes: Note[]
   tagColors?: Record<string, string> // tags without an entry use colorFor's hash
+  views?: SavedView[]
   sidebarOrder?: string[] // your own + team project ids as you arranged them in the sidebar; only yours
   toast: { id: string; text: string } | null
 }
@@ -28,6 +29,8 @@ export type Action =
   | { type: 'removeAutomation'; id: string }
   | { type: 'saveNote'; note: Note }
   | { type: 'removeNote'; id: string }
+  | { type: 'saveView'; view: SavedView }
+  | { type: 'removeView'; id: string }
   | { type: 'reorder'; list: 'tasks' | 'projects'; from: string; to: string }
   | { type: 'sidebarOrder'; ids: string[] }
   | { type: 'dismissToast' }
@@ -115,6 +118,7 @@ export function reducer(s: State, a: Action): State {
         ...s,
         tagColors: color ? { ...tagColors, [a.to]: color } : tagColors,
         tasks: s.tasks.map(t => (t.tags.includes(a.from) ? { ...t, tags: swap(t.tags) } : t)),
+        views: s.views?.map(v => ({ ...v, tags: swap(v.tags) })),
         automations: s.automations.map(x => ({
           ...x,
           trigger: x.trigger.kind === 'tag' && x.trigger.tag === a.from ? { ...x.trigger, tag: a.to } : x.trigger,
@@ -152,6 +156,11 @@ export function reducer(s: State, a: Action): State {
       return { ...s, notes: [a.note, ...rest] }
     }
     case 'removeNote': return { ...s, notes: s.notes.filter(x => x.id !== a.id) }
+    case 'saveView': {
+      const views = s.views ?? []
+      return { ...s, views: views.some(x => x.id === a.view.id) ? views.map(x => (x.id === a.view.id ? a.view : x)) : [...views, a.view] }
+    }
+    case 'removeView': return { ...s, views: s.views?.filter(x => x.id !== a.id) }
     case 'reorder': {
       // Move `from` to `to`'s slot in the full array; items hidden by the current view keep their relative order.
       const list: { id: string }[] = s[a.list]
@@ -219,14 +228,38 @@ export function useStore(userId: string) {
 }
 
 export interface Team { id: string; name: string; color: string; members: { email: string; role: 'owner' | 'member' }[]; data: State }
-interface TeamRow { id: string; name: string; color: string; data: Partial<State>; team_members: Team['members'] }
+interface TeamRow { id: string; name: string; color: string; data: Partial<State>; updated_at: string; team_members: Team['members'] }
+type Shared = Pick<State, 'tasks' | 'projects' | 'automations' | 'tagColors' | 'views'>
 
-const teamJson = (t: Team) => JSON.stringify({ tasks: t.data.tasks, projects: t.data.projects, automations: t.data.automations, tagColors: t.data.tagColors })
+/** Three-way merge by id: keep what others saved (remote) and replay only what this tab changed since base. */
+export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
+  const list = <T extends { id: string }>(b: T[] = [], l: T[] = [], r: T[] = []) => {
+    const bs = new Map(b.map(x => [x.id, JSON.stringify(x)]))
+    const ls = new Map(l.map(x => [x.id, x]))
+    const changed = (x: T) => bs.get(x.id) !== JSON.stringify(x)
+    const kept = r.flatMap(x => {
+      const mine = ls.get(x.id)
+      if (!mine) return bs.has(x.id) ? [] : [x] // deleted here, or added remotely
+      return [changed(mine) ? mine : x]
+    })
+    return [...kept, ...l.filter(x => !bs.has(x.id) && !r.some(y => y.id === x.id))]
+  }
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+  return {
+    tasks: list(base.tasks, local.tasks, remote.tasks),
+    projects: list(base.projects, local.projects, remote.projects),
+    automations: list(base.automations, local.automations, remote.automations),
+    views: list(base.views, local.views, remote.views),
+    tagColors: same(base.tagColors, local.tagColors) ? remote.tagColors : { ...remote.tagColors, ...local.tagColors },
+  }
+}
+
+const teamJson = (t: Team) => JSON.stringify({ tasks: t.data.tasks, projects: t.data.projects, automations: t.data.automations, tagColors: t.data.tagColors, views: t.data.views })
 type Profiles = Map<string, { name: string | null; photo: string | null }>
 const toTeam = (r: TeamRow, profiles: Profiles): Team => ({
   id: r.id, name: r.name, color: r.color, members: r.team_members,
   data: {
-    tasks: r.data.tasks ?? [], projects: r.data.projects ?? [], automations: r.data.automations ?? [], tagColors: r.data.tagColors, notes: [], toast: null,
+    tasks: r.data.tasks ?? [], projects: r.data.projects ?? [], automations: r.data.automations ?? [], tagColors: r.data.tagColors, views: r.data.views, notes: [], toast: null,
     people: r.team_members.map(m => {
       const p = profiles.get(m.email)
       return { id: m.email, name: p?.name || m.email.split('@')[0], photo: p?.photo ?? undefined }
@@ -237,22 +270,27 @@ const toTeam = (r: TeamRow, profiles: Profiles): Team => ({
 /** Teams the signed-in email belongs to. Each team's data runs through the same reducer as the personal space. */
 export function useTeams(me: string) {
   const [teams, setTeams] = useState<Team[]>([])
-  const saved = useRef(new Map<string, string>())
+  // Last server version per team: base for the merge and for the conditional save.
+  const saved = useRef(new Map<string, { json: string; at: string }>())
+  const saving = useRef(new Set<string>())
+  const [retry, setRetry] = useState(0)
 
   const load = useCallback(async () => {
     const [{ data, error }, who] = await Promise.all([
-      supabase.from('teams').select('id, name, color, data, team_members(email, role)').order('updated_at'),
+      supabase.from('teams').select('id, name, color, data, updated_at, team_members(email, role)').order('updated_at'),
       supabase.rpc('member_profiles'), // name + photo from the Silus profile; see supabase/member_profiles.sql
     ])
     if (error) return console.error(error)
     if (who.error) console.error(who.error)
     const profiles: Profiles = new Map((who.data ?? []).map((p: { email: string; name: string | null; photo: string | null }) => [p.email, p]))
-    const fresh = (data as TeamRow[]).map(r => toTeam(r, profiles))
-    setTeams(cur => fresh.map(t => {
+    const rows = data as TeamRow[]
+    setTeams(cur => rows.map(r => {
+      const t = toTeam(r, profiles)
       const local = cur.find(x => x.id === t.id)
-      // Unsaved local edits win over the echo of an older save.
-      if (local && teamJson(local) !== saved.current.get(t.id)) return { ...t, data: { ...t.data, ...local.data, people: t.data.people } }
-      saved.current.set(t.id, teamJson(t))
+      const base = saved.current.get(t.id)
+      saved.current.set(t.id, { json: teamJson(t), at: r.updated_at })
+      // Unsaved local edits are replayed on top of the server version, never instead of it.
+      if (local && base && teamJson(local) !== base.json) return { ...t, data: { ...t.data, ...rebase(JSON.parse(base.json), local.data, t.data) } }
       return t
     }))
   }, [])
@@ -267,20 +305,30 @@ export function useTeams(me: string) {
   }, [load])
 
   useEffect(() => {
-    const dirty = teams.filter(t => teamJson(t) !== saved.current.get(t.id))
+    const dirty = teams.filter(t => saved.current.has(t.id) && !saving.current.has(t.id) && teamJson(t) !== saved.current.get(t.id)!.json)
     if (!dirty.length) return
-    // ponytail: last-write-wins per team, move tasks to rows if two people edit the same team at once often
-    const id = setTimeout(() => dirty.forEach(t => {
+    // ponytail: whole-team document with optimistic lock + merge; move tasks to rows if teams grow large
+    const id = setTimeout(() => dirty.forEach(async t => {
       const json = teamJson(t)
-      saved.current.set(t.id, json)
-      supabase.from('teams').update({ data: JSON.parse(json), updated_at: new Date().toISOString() }).eq('id', t.id)
-        .then(({ error }) => error && console.error(error))
+      const at = new Date().toISOString()
+      saving.current.add(t.id)
+      // Only overwrite the version we started from; otherwise reload, merge and try again.
+      const { data, error } = await supabase.from('teams').update({ data: JSON.parse(json), updated_at: at })
+        .eq('id', t.id).eq('updated_at', saved.current.get(t.id)!.at).select('id')
+      saving.current.delete(t.id)
+      if (error) console.error(error)
+      else if (data.length) saved.current.set(t.id, { json, at })
+      else await load()
+      setRetry(n => n + 1)
     }), 800)
     return () => clearTimeout(id)
-  }, [teams])
+  }, [teams, retry, load])
 
-  const dispatchTeam = useCallback((id: string, a: Action) =>
-    setTeams(ts => ts.map(t => (t.id === id ? { ...t, data: reducer(t.data, a) } : t))), [])
+  // Team tasks remember who made them; personal ones are always yours.
+  const dispatchTeam = useCallback((id: string, a: Action) => {
+    if (a.type === 'add' && !a.task.createdBy) a = { ...a, task: { ...a.task, createdBy: me } }
+    setTeams(ts => ts.map(t => (t.id === id ? { ...t, data: reducer(t.data, a) } : t)))
+  }, [me])
 
   const fail = (error: { message: string } | null) => { if (error) { alert(`Não foi possível salvar: ${error.message}`); return true } return false }
   const api = {

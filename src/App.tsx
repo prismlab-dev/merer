@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ComponentProps, type CSSProperties } from 'react'
-import { type Task, isDone, projectMembers, span, today, uid } from './lib'
+import { type Task, isDone, projectMembers, span, today, uid, viewTasks } from './lib'
 import { type Action, type State, type Team, useStore, useTeams } from './store'
 import { ColorField, Popover, Tip } from './controls'
 import { QuickAdd, QuickAddModal, type Ctx } from './tasks'
@@ -11,6 +11,8 @@ import { NotesView } from './notes'
 import { SettingsDialog, bgProps, useLook } from './settings'
 import { Avatar, Dialog, Icon, Logo, PALETTE, PROJECT_COLORS, btnGhost, btnPrimary, colorFor, setTagColors, inputCls, tint, type IconName } from './ui'
 import { AutomationsView, FILTERS, HeadSlot, MenuItem, ProjectsView, FiltersView, TagsView, ListView, NameField, ProjectView, TodayView, UpcomingView, UpcomingWindows, type View } from './views'
+import { SavedViewPage } from './saved'
+import { viewColor } from './viewText'
 
 export default function App({ userId, email }: { userId: string; email: string }) {
   const [state, dispatch] = useStore(userId)
@@ -46,6 +48,16 @@ export default function App({ userId, email }: { userId: string; email: string }
     else dispatch(a)
   }
   const ctx: Ctx = { state: merged, dispatch: route, open }
+  // Saved views also reach tasks delegated to others, in the team projects you take part in.
+  const inProject = (x: Team, id: string) => { const p = x.data.projects.find(y => y.id === id); return !!p && projectMembers(p, x.members.map(m => m.email)).includes(email) }
+  const wide: Ctx = {
+    ...ctx, wide: true,
+    state: {
+      ...merged,
+      people: [...new Map(teams.flatMap(x => x.data.people).map(p => [p.id, p])).values()],
+      tasks: [...state.tasks, ...teams.flatMap(x => x.data.tasks.filter(t => assigned(x, t) || inProject(x, t.projectId)))],
+    },
+  }
   const teamCtx = (tm: Team): Ctx => ({ state: tm.data, dispatch: a => dispatchTeam(tm.id, a), open })
   const [head, setHead] = useState<HTMLElement | null>(null)
   const [bar, setBar] = useState<HTMLElement | null>(null)
@@ -82,7 +94,11 @@ export default function App({ userId, email }: { userId: string; email: string }
   const tm = teams.find(x => x.id === (view.kind === 'team' ? view.id : view.team))
   const c = tm ? teamCtx(tm) : ctx
   const own: Ctx = tm ? c : { state: { ...state, people: [] }, dispatch, open } // no delegating in your own space
-  setTagColors({ ...state.tagColors, ...c.state.tagColors })
+  // Personal pages mix every team's tags; on a name clash yours wins there, while team tasks keep their team's colour.
+  setTagColors(
+    tm ? { ...state.tagColors, ...tm.data.tagColors } : { ...Object.assign({}, ...teams.map(x => x.data.tagColors)), ...state.tagColors },
+    Object.fromEntries(teams.flatMap(x => x.data.projects.map(p => [p.id, { ...state.tagColors, ...x.data.tagColors }]))),
+  )
   const saveTag = (from: string, to: string, color?: string) => { own.dispatch({ type: 'renameTag', from, to, color }); if (to !== from) goIn({ kind: 'tag', tag: to }) }
   const goIn = (v: View) => go(tm ? { ...v, team: tm.id } : v)
 
@@ -152,7 +168,7 @@ export default function App({ userId, email }: { userId: string; email: string }
     case 'home': content = <HomeView ctx={ctx} go={go} />; break
     case 'today': content = <TodayView ctx={ctx} />; break
     case 'upcoming': content = <UpcomingView ctx={ctx} />; break
-    case 'filters': content = <FiltersView ctx={ctx} go={go} />; break
+    case 'filters': content = <FiltersView ctx={ctx} wide={wide} go={go} />; break
     case 'tags': content = <TagsView ctx={ctx} go={go} onNew={newTag} teams={teams} />; break
     case 'projects': content = <ProjectsView ctx={own} go={go} onNew={() => newProject()} />; break
     case 'automations': content = <AutomationsView ctx={own} />; break
@@ -171,6 +187,8 @@ export default function App({ userId, email }: { userId: string; email: string }
       onEdit={() => { setDraft({ id: view.tag, name: view.tag, color: colorFor(view.tag) }); setDialog('tag') }}
       onDelete={() => { if (confirm(`Remover a etiqueta “${view.tag}” de todas as tarefas?`)) { own.dispatch({ type: 'removeTag', tag: view.tag }); go(tm ? { kind: 'team', id: tm.id, tab: 'tags' } : { kind: 'tags' }) } }} />; break
     case 'filter': content = <ListView ctx={c} title={FILTERS[view.id].label} icon={FILTERS[view.id].icon} color={FILTERS[view.id].color} tasks={c.state.tasks.filter(x => FILTERS[view.id].test(x, c.state.tasks))} />; break
+    case 'view': content = <SavedViewPage key={(view.team ?? '') + view.id} id={view.id} ctx={tm ? c : wide} team={tm?.name} back={tm ? { kind: 'team', id: tm.id, tab: 'filters' } : { kind: 'filters' }} go={goIn}
+      ctxFor={pid => { const x = teams.find(y => y.data.projects.some(p => p.id === pid)); return x ? teamCtx(x) : ctx }} />; break
     case 'search': {
       const who = view.q.startsWith('+') ? c.state.people.find(p => p.id === view.q.slice(1)) : null
       content = who
@@ -204,6 +222,17 @@ export default function App({ userId, email }: { userId: string; email: string }
           {item({ kind: 'today' }, 'today', 'Hoje', todayCount)}
           {item({ kind: 'upcoming' }, 'upcoming', 'Em breve')}
           {item({ kind: 'filters' }, 'filter', 'Visualizações')}
+          {state.views?.filter(v => v.pinned).map(v => {
+            const active = view.kind === 'view' && !view.team && view.id === v.id
+            const n = viewTasks(v, wide.state.tasks).length
+            return (
+              <button key={v.id} type="button" onClick={() => go({ kind: 'view', id: v.id })} title={mini ? v.name : undefined} aria-label={v.name} aria-current={active ? 'page' : undefined} className={navCls(active)}>
+                <span className="shrink-0" style={{ color: viewColor(v, wide.state) }}><Icon name={v.layout} className="size-[17px]" /></span>
+                <span className="lbl flex-1 truncate text-left text-[13px]">{v.name}</span>
+                {!!n && <span className={`lbl shrink-0 text-xs tabular-nums ${active ? 'text-white/70' : 'text-white/35'}`}>{n}</span>}
+              </button>
+            )
+          })}
           <button ref={setMoreAnchor} type="button" onClick={() => setMoreOpen(o => !o)} title={mini ? 'Mais páginas' : undefined} aria-label="Mais páginas"
             aria-haspopup="menu" aria-expanded={moreOpen} className={navCls(!!moreHere)}>
             <Icon name={moreHere ? moreHere[1] : 'dots'} className={`size-[17px] shrink-0 transition-colors ${moreHere || moreOpen ? 'text-white' : 'text-ink-3 group-hover:text-white/80 group-focus-visible:text-white/80'}`} />
@@ -298,7 +327,7 @@ export default function App({ userId, email }: { userId: string; email: string }
         </div>
         {/* Left-anchored, not centred: the column hangs off the sidebar and leaves the backdrop open on the right. */}
         {/* Only this area scrolls vertically (page bar stays); the title scrolls with it, board columns scroll sideways on their own. */}
-        <div className="min-h-0 w-full flex-1 overflow-y-auto has-[.board]:flex has-[.board]:flex-col px-3 py-5 sm:px-5 lg:py-9 lg:pl-8 lg:pr-9 has-[.board]:pb-0!">
+        <div className="min-h-0 w-full flex-1 overflow-y-auto has-[.board]:flex has-[.board]:flex-col has-[.table-view]:overflow-hidden px-3 py-5 sm:px-5 lg:py-9 lg:pl-8 lg:pr-9 has-[.board]:pb-0!">
           <div ref={setHead} />
           <HeadSlot.Provider value={head && bar && { head, bar }}>
           {view.kind === 'home' ? content : view.kind === 'upcoming' ? (
@@ -307,7 +336,7 @@ export default function App({ userId, email }: { userId: string; email: string }
               <div className="float rise min-w-0 rounded-[28px] px-4 py-6 sm:px-8 sm:py-8 xl:w-[760px] xl:shrink-0 has-[.board]:flex has-[.board]:flex-1 has-[.board]:flex-col has-[.board]:w-full! has-[.board]:shrink! has-[.board]:border-transparent! has-[.board]:bg-transparent! has-[.board]:shadow-none! has-[.board]:backdrop-blur-none! has-[.board]:px-0! has-[.board]:py-0!">{content}</div>
               <div className="float rise min-w-0 rounded-[28px] px-4 py-6 sm:px-6 xl:sticky xl:top-4 xl:ml-auto xl:w-[600px] xl:shrink"><UpcomingWindows ctx={ctx} /></div>
             </div>
-          ) : <div className={`float rise rounded-[28px] px-4 py-6 sm:px-8 sm:py-8 ${['filters', 'tags', 'automations', 'notes', 'team'].includes(view.kind) ? '' : 'max-w-[812px] has-[.board]:flex has-[.board]:flex-1 has-[.board]:flex-col has-[.board]:max-w-none has-[.board]:border-transparent! has-[.board]:bg-transparent! has-[.board]:shadow-none! has-[.board]:backdrop-blur-none! has-[.board]:px-0! has-[.board]:py-0!'}`}>{content}</div>}
+          ) : <div className={`float rise rounded-[28px] px-4 py-6 sm:px-8 sm:py-8 ${['filters', 'tags', 'automations', 'notes', 'team'].includes(view.kind) ? '' : 'max-w-[812px] has-[.board]:flex has-[.board]:flex-1 has-[.board]:flex-col has-[.table-view]:min-h-0 has-[.table-view]:min-w-0 has-[.board]:max-w-none has-[.board]:border-transparent! has-[.board]:bg-transparent! has-[.board]:shadow-none! has-[.board]:backdrop-blur-none! has-[.board]:px-0! has-[.board]:py-0!'}`}>{content}</div>}
           </HeadSlot.Provider>
         </div>
       </main>

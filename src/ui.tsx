@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Calendar, CalendarCheck, ClockAlert, CalendarDays, CalendarRange, ChevronRight, Clock, Target, Hash, Hourglass, Inbox, Link2, ListFilter,
-  ListTree, Lock, LockOpen, Pencil, ChevronsUp, ChevronUp, ChevronDown, Equal, Menu, Plus, Repeat, Search, Tag, Trash2, User, Users, X, Zap, CircleDashed, CircleCheck, Timer, Play, Pause, RotateCcw, SkipForward, TrendingUp, Sparkles, House, Pyramid, ChevronsLeft, ChevronsRight, StickyNote, Pin, PinOff, Settings, EllipsisVertical, Ellipsis, SquaresUnite, Columns3, Rows3, type LucideIcon,
+  ListTree, Lock, LockOpen, Pencil, ChevronsUp, ChevronUp, ChevronDown, Equal, Menu, Plus, Repeat, Search, Tag, Trash2, User, Users, X, Zap, CircleDashed, CircleCheck, Timer, Play, Pause, RotateCcw, SkipForward, TrendingUp, Sparkles, House, Pyramid, ChevronsLeft, ChevronsRight, StickyNote, Pin, PinOff, Settings, EllipsisVertical, Ellipsis, SquaresUnite, Columns3, Rows3, Table2, type LucideIcon,
 } from 'lucide-react'
 import { Tip } from './controls'
 import { type Person, type Priority, type Status, type When, fmtDay, fmtWhen, isDone, progressOf } from './lib'
@@ -12,7 +12,7 @@ const ICONS = {
   calendar: Calendar, clock: Clock, window: CalendarRange, deadline: Target, late: ClockAlert, repeat: Repeat, duration: Hourglass,
   tag: Tag, link: Link2, plus: Plus, search: Search, x: X, trash: Trash2, edit: Pencil, menu: Menu, subtasks: ListTree,
   hash: Hash, user: User, users: Users, chevron: ChevronRight, lock: Lock, unlock: LockOpen, progress: CircleDashed, done: CircleCheck, prioHighest: ChevronsUp, prioHigh: ChevronUp, prioMedium: Equal, prioLow: ChevronDown,
-  timer: Timer, play: Play, pause: Pause, reset: RotateCcw, skip: SkipForward, trend: TrendingUp, sparkle: Sparkles, home: House, panel: ChevronsLeft, panelOpen: ChevronsRight, note: StickyNote, pin: Pin, unpin: PinOff, settings: Settings, teamProject: SquaresUnite, board: Columns3, list: Rows3,
+  timer: Timer, play: Play, pause: Pause, reset: RotateCcw, skip: SkipForward, trend: TrendingUp, sparkle: Sparkles, home: House, panel: ChevronsLeft, panelOpen: ChevronsRight, note: StickyNote, pin: Pin, unpin: PinOff, settings: Settings, teamProject: SquaresUnite, board: Columns3, list: Rows3, table: Table2,
 } satisfies Record<string, LucideIcon>
 export type IconName = keyof typeof ICONS
 export function Icon({ name, className = 'size-4' }: { name: IconName; className?: string }) {
@@ -34,9 +34,10 @@ export const PALETTE = {
 export const PROJECT_COLORS = ['#e58ad6', '#9b8cff', '#5cb8ff', '#3dd6c3', '#f7c04a', '#ff7b8a']
 // ponytail: module-level map set by App each render; move to context if tags ever render outside App
 let tagColors: Record<string, string> = {}
-export const setTagColors = (m: Record<string, string>) => { tagColors = m }
-/** Colour for a tag: the one picked by the user, else a stable palette hash. */
-export const colorFor = (s: string) => tagColors[s] ?? PROJECT_COLORS[[...s].reduce((h, c) => h + c.charCodeAt(0), 0) % PROJECT_COLORS.length]
+let projectTagColors: Record<string, Record<string, string>> = {}
+export const setTagColors = (m: Record<string, string>, byProject: Record<string, Record<string, string>>) => { tagColors = m; projectTagColors = byProject }
+/** Colour for a tag: the one picked by the user (a team project's tags use that team's colours on every page), else a stable palette hash. */
+export const colorFor = (s: string, projectId?: string) => (projectTagColors[projectId ?? ''] ?? tagColors)[s] ?? PROJECT_COLORS[[...s].reduce((h, c) => h + c.charCodeAt(0), 0) % PROJECT_COLORS.length]
 export const tint = (c: string, pct = 14) => `color-mix(in oklab, ${c} ${pct}%, transparent)`
 
 // Jira-style: double chevron up = highest, down = lowest.

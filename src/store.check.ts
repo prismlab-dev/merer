@@ -1,7 +1,7 @@
 // Run: npx tsx src/store.check.ts (store imports extensionless modules, so plain node can't load it)
 import assert from 'node:assert/strict'
 import { blankTask, isDone, today } from './lib.ts'
-import { reducer, type State } from './store.ts'
+import { rebase, reducer, type State } from './store.ts'
 
 // Recurring parent with subtask-driven status: finishing the last subtask rolls it and reopens the subtasks.
 const x = blankTask({ id: 'x', status: { kind: 'subtasks', done: 0, total: 0 }, when: { kind: 'date', date: today() },
@@ -19,3 +19,12 @@ assert.equal(get('x').completions, 1)
 assert.deepEqual(get('x').status, { kind: 'subtasks', done: 0, total: 2 })
 assert.ok(!isDone(get('a').status) && !isDone(get('b').status))
 console.log('store ok')
+
+// Team merge: a task created elsewhere survives this tab's pending edit, and local edits/deletes still apply.
+{
+  const a = blankTask({ id: 'a', title: 'A' }), b = blankTask({ id: 'b' })
+  const base = { tasks: [a, b], projects: [], automations: [] }
+  const local = { ...base, tasks: [{ ...a, title: 'A2' }] } // edited a, deleted b
+  const remote = { ...base, tasks: [a, b, blankTask({ id: 'ext' })] } // the script added ext
+  assert.deepEqual(rebase(base, local, remote).tasks.map(t => t.id + (t.title ?? '')), ['aA2', 'ext'])
+}

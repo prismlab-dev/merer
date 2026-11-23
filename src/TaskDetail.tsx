@@ -14,6 +14,7 @@ export function TaskDetail({ task, ctx, team, onClose }: { task: Task; ctx: Ctx;
   const parent = state.tasks.find(t => t.id === task.parentId)
   const subs = state.tasks.filter(t => t.parentId === task.id)
   const t = today()
+  const creator = team && task.createdBy ? state.people.find(p => p.id === task.createdBy) ?? { id: task.createdBy, name: task.createdBy.split('@')[0] } : null
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -88,7 +89,7 @@ export function TaskDetail({ task, ctx, team, onClose }: { task: Task; ctx: Ctx;
             <DurationEditor task={task} set={set} />
             <RecurrenceEditor task={task} set={set} />
             <Field label="Etiquetas">
-              <TagEditor tags={task.tags} all={[...new Set([...state.tasks.flatMap(x => x.tags), ...Object.keys(state.tagColors ?? {})])]} onChange={tags => set({ tags })} />
+              <TagEditor tags={task.tags} projectId={task.projectId} all={[...new Set([...state.tasks.flatMap(x => x.tags), ...Object.keys(state.tagColors ?? {})])]} onChange={tags => set({ tags })} />
             </Field>
             {state.people.length > 0 && <Field label="Responsáveis">
               <Select<string> ariaLabel="Responsáveis" multi={task.assignees} icon="users" placeholder="Atribuir a…" searchable
@@ -99,6 +100,9 @@ export function TaskDetail({ task, ctx, team, onClose }: { task: Task; ctx: Ctx;
         </div>
 
         <footer className="flex items-center gap-4 border-t border-white/[0.06] px-5 py-3">
+          {creator && <span title={`Criada por ${creator.name}`} className="flex shrink-0 items-center gap-1.5 border-r border-white/[0.06] pr-4 text-xs text-white/45">
+            <Avatar person={creator} size="size-4" bare />Criada por <span className="text-white/70">{creator.name}</span>
+          </span>}
           <dl className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
             {stats.map(([k, icon, v]) => (
               <div key={k} title={k} className={`flex items-center gap-1.5 ${v ? 'text-white/70' : 'text-white/25'}`}
@@ -356,8 +360,8 @@ function SeriesTable({ when, rec }: { when: When; rec: Recurrence }) {
   )
 }
 
-function TagEditor({ tags, all, onChange }: { tags: string[]; all: string[]; onChange: (t: string[]) => void }) {
-  const options = [...new Set([...all, ...tags])].sort().map(t => ({ value: t, label: t, icon: 'tag' as const, color: colorFor(t) }))
+function TagEditor({ tags, projectId, all, onChange }: { tags: string[]; projectId: string; all: string[]; onChange: (t: string[]) => void }) {
+  const options = [...new Set([...all, ...tags])].sort().map(t => ({ value: t, label: t, icon: 'tag' as const, color: colorFor(t, projectId) }))
   return (
     <Select<string> ariaLabel="Etiquetas" multi={tags} options={options} placeholder="Adicionar etiqueta" icon="tag" createNoun="etiqueta"
       onChange={t => onChange(tags.includes(t) ? tags.filter(x => x !== t) : [...tags, t])}
