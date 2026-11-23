@@ -72,5 +72,12 @@ console.log('rebase ok')
   const m = rebase(base, { ...base, tasks: [{ ...p, status: { kind: 'subtasks', done: 1, total: 2 } }, fin(a), b] },
     { ...base, tasks: [{ ...p, status: { kind: 'subtasks', done: 1, total: 2 } }, a, fin(b)] })
   assert.deepEqual(m.tasks.find(t => t.id === 'p')!.status, { kind: 'subtasks', done: 2, total: 2 })
+  // A recurring parent rolls to its next date and reopens its subtasks instead of sitting done.
+  const rp = { ...p, when: { kind: 'date' as const, date: today() }, recurrence: { every: 1, unit: 'week' as const, weekdays: [], anchor: 'schedule' as const, until: null } }
+  const rbase = { ...base, tasks: [rp, a, b] }
+  const half = { ...rp, status: { kind: 'subtasks' as const, done: 1, total: 2 } }
+  const r = rebase(rbase, { ...rbase, tasks: [half, fin(a), b] }, { ...rbase, tasks: [half, a, fin(b)] }).tasks
+  assert.equal(r[0].completions, 1)
+  assert.ok(r.every(t => !isDone(t.status)))
   console.log('parent recount ok')
 }

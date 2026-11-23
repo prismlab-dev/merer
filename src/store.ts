@@ -267,17 +267,16 @@ export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
   const projects = list(base.projects, local.projects, remote.projects)
   // A project deleted on either side takes its tasks along, including ones just added to it on the other.
   const gone = new Set([...base.projects, ...local.projects, ...remote.projects].map(p => p.id).filter(id => !projects.some(p => p.id === id)))
-  // Subtasks finished on both sides: recount their parents from the merged list (just the count, no side effects).
-  const merged = list(base.tasks, local.tasks, remote.tasks).filter(t => !gone.has(t.projectId))
-  const tasks = merged.map(p => {
-    if (p.status.kind !== 'subtasks') return p
-    const subs = merged.filter(t => t.parentId === p.id)
-    return { ...p, status: { ...p.status, done: subs.filter(t => isDone(t.status)).length, total: subs.length } }
-  })
+  const automations = list(base.automations, local.automations, remote.automations)
+  // Subtasks finished on both sides: recount their parents like a local edit would (rolling a finished
+  // recurring parent), deepest first so a parent that completes counts toward its own parent.
+  let s = { tasks: list(base.tasks, local.tasks, remote.tasks).filter(t => !gone.has(t.projectId)), projects, automations, people: [], notes: [], toast: null } as State
+  const depth = (t?: Task): number => t?.parentId ? 1 + depth(s.tasks.find(x => x.id === t.parentId)) : 0
+  for (const p of [...s.tasks].sort((a, b) => depth(b) - depth(a))) s = syncParent(s, p.id)
   return {
-    tasks,
+    tasks: s.tasks,
     projects,
-    automations: list(base.automations, local.automations, remote.automations),
+    automations,
     views: list(base.views, local.views, remote.views),
     tagColors: fields(base.tagColors ?? {}, local.tagColors ?? {}, remote.tagColors ?? {}),
   }

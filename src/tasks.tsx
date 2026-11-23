@@ -8,7 +8,7 @@ import { DateField, Select, Tip } from './controls'
 import { Sortable, useDrag, useRow } from './sortable'
 import { Avatar, Icon, Meta, PALETTE, projectIcon, PRIORITY, StatusGlyph, btnGhost, btnPrimary, colorFor, priorityOptions, tint, WhenLabel, type IconName } from './ui'
 
-export interface Ctx { state: State; dispatch: Dispatch<Action>; open: (id: string) => void; wide?: boolean; oneTeam?: boolean } // wide: your space plus your teams' tasks, whoever does them (saved views)
+export interface Ctx { state: State; dispatch: Dispatch<Action>; open: (id: string) => void; wide?: boolean; oneTeam?: boolean; only?: Set<string> } // wide: your space plus your teams' tasks, whoever does them (saved views); only: subtasks a saved view lets through
 
 const WHEN_ICON: Record<When['kind'], IconName> = { date: 'calendar', time: 'clock', slot: 'clock', window: 'window' }
 
@@ -38,7 +38,7 @@ export function TaskRow({ task, ctx, showProject, depth = 0, drag, branch, small
   const done = isDone(task.status)
   const day = task.when && span(task.when)[0]
   // Cross-project lists (showProject) nest only subtasks sharing the parent's day; dated-apart ones show on their own day.
-  const subs = state.tasks.filter(x => x.parentId === task.id && (!showProject || !x.when || span(x.when)[0] === day))
+  const subs = state.tasks.filter(x => x.parentId === task.id && (!ctx.only || ctx.only.has(x.id)) && (!showProject || !x.when || span(x.when)[0] === day))
   const parent = depth === 0 && task.parentId ? state.tasks.find(x => x.id === task.parentId) : undefined
   const waiting = blockers(task, state.tasks)
   const project = state.projects.find(p => p.id === task.projectId)

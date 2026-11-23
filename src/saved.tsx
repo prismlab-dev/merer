@@ -67,7 +67,7 @@ function columns(v: SavedView, tasks: Task[], ctx: Ctx): Col[] {
 
 /** One line per task: status, title, and the time when it has one. A parent lists all its subtasks on a rail beneath it; a subtask on its own day names its parent. */
 /** `group`: what the table's rows are, so the card shows the other side (tags under a project row, the project under a tag row). */
-/** `shown`: tasks in the view; subtasks outside it stay off the rail. */
+/** `shown`: tasks of this cell; subtasks elsewhere (another person, day or filter) stay off the rail. */
 function TableTask({ task, ctx, under, group, shown }: { task: Task; ctx: Ctx; under?: boolean; group?: ViewGroup; shown: Set<string> }) {
   const project = group === 'tag' ? ctx.state.projects.find(p => p.id === task.projectId) : undefined
   const tags = group === 'project' || group === 'section' ? task.tags : []
@@ -104,7 +104,7 @@ const LONG_WD = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 's
 const readSizes = (key: string): Record<string, number> => { try { return JSON.parse(localStorage.getItem(key) ?? '{}') } catch { return {} } }
 
 /** Rows by group, one column per day, always the size of the screen. Borders drag to resize (double click resets); sizes are kept per view on this device. */
-function DayTable({ viewId, days, rows, flip, render }: { viewId: string; days: DayCol[]; rows: Col[]; flip?: boolean; render: (t: Task) => ReactNode }) {
+function DayTable({ viewId, days, rows, flip, render }: { viewId: string; days: DayCol[]; rows: Col[]; flip?: boolean; render: (t: Task, cell: Task[]) => ReactNode }) {
   const key = `table-sizes:${viewId}`
   const [size, setSize] = useState(() => readSizes(key))
   const [head, setHead] = useState(() => readSizes(key).head ?? 180)
@@ -187,7 +187,7 @@ function DayTable({ viewId, days, rows, flip, render }: { viewId: string; days: 
           {days.map(([id, , has]) => {
             // Subtasks already hang under their parent here; elsewhere they still show on their own day.
             const here = c.tasks.filter(has), top = here.filter(t => !here.some(p => p.id === t.parentId))
-            return <div key={id} className={`min-h-0 min-w-0 overflow-y-auto border-b border-l border-white/[0.05] space-y-1.5 p-2 ${id === now ? 'bg-iris/[0.04]' : id.length === 10 && [0, 6].includes(parseISO(id).getDay()) ? 'bg-black/15' : ''}`}>{top.map(render)}</div>
+            return <div key={id} className={`min-h-0 min-w-0 overflow-y-auto border-b border-l border-white/[0.05] space-y-1.5 p-2 ${id === now ? 'bg-iris/[0.04]' : id.length === 10 && [0, 6].includes(parseISO(id).getDay()) ? 'bg-black/15' : ''}`}>{top.map(t => render(t, here))}</div>
           })}
         </div>)}
       </div>
@@ -235,10 +235,9 @@ export function SavedViewPage({ id, ctx: given, ctxFor, team, back, go }: { id: 
   const tasks = viewTasks(v, state.tasks)
   // Only one team's tasks here (none of your own): marking each one as the team's says nothing.
   const spaces = new Set(tasks.map(t => state.projects.find(p => p.id === t.projectId)?.team?.id))
-  const ctx: Ctx = { ...given, oneTeam: spaces.size === 1 && !spaces.has(undefined) }
+  const ctx: Ctx = { ...given, oneTeam: spaces.size === 1 && !spaces.has(undefined), only: new Set(viewTasks(v, state.tasks, undefined, true).map(t => t.id)) }
   const count = `${tasks.length} tarefa${tasks.length === 1 ? '' : 's'}`
   const tableTasks = v.layout === 'table' ? viewTasks(v, state.tasks, undefined, true) : tasks
-  const shown = new Set(tableTasks.map(t => t.id))
   // Projected repeats only where the table has a day for them.
   const shownDays = v.due === 'today' ? [today()] : tableDays(v.weekdays)
   const ghosts = v.layout === 'table' && v.projections ? projections(tableTasks).filter(g => shownDays.some(d => onDay(g, d))) : []
@@ -395,7 +394,7 @@ export function SavedViewPage({ id, ctx: given, ctxFor, team, back, go }: { id: 
           )}
         </Kanban>
       ) : v.layout === 'table' ? (tasks.length ? (
-        <DayTable viewId={v.id} flip={v.flip} days={dayCols} rows={cols.filter(c => c.tasks.length)} render={t => t.ghostOf ? <Ghost key={t.id} task={t} ctx={ctx}><TableTask task={t} ctx={ctx} group={group} shown={shown} /></Ghost> : <TableTask key={t.id} task={t} ctx={ctx} group={group} shown={shown} />} />
+        <DayTable viewId={v.id} flip={v.flip} days={dayCols} rows={cols.filter(c => c.tasks.length)} render={(t, cell) => { const shown = new Set(cell.map(x => x.id)); return t.ghostOf ? <Ghost key={t.id} task={t} ctx={ctx}><TableTask task={t} ctx={ctx} group={group} shown={shown} /></Ghost> : <TableTask key={t.id} task={t} ctx={ctx} group={group} shown={shown} /> }} />
       ) : nothing) : <>
         {!tasks.length && nothing}
         {group === 'none' || !tasks.length ? <><TaskList tasks={tasks} ctx={ctx} showProject />{group === 'none' && adder('all')}</>
