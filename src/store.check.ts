@@ -28,3 +28,27 @@ console.log('store ok')
   const remote = { ...base, tasks: [a, b, blankTask({ id: 'ext' })] } // the script added ext
   assert.deepEqual(rebase(base, local, remote).tasks.map(t => t.id + (t.title ?? '')), ['aA2', 'ext'])
 }
+
+// Team merge, field by field: two people editing different fields of one task both keep theirs.
+{
+  const a = blankTask({ id: 'a', title: 'A', priority: 4 })
+  const base = { tasks: [a], projects: [], automations: [] }
+  const m = rebase(base, { ...base, tasks: [{ ...a, title: 'A2' }] }, { ...base, tasks: [{ ...a, priority: 1 }] })
+  assert.deepEqual([m.tasks[0].title, m.tasks[0].priority], ['A2', 1])
+}
+// A project deleted remotely takes along a task just added to it here.
+{
+  const p = { id: 'p', name: 'P', color: '#fff', sections: [] } as unknown as State['projects'][number]
+  const base = { tasks: [], projects: [p], automations: [] }
+  const m = rebase(base, { ...base, tasks: [blankTask({ id: 'n', projectId: 'p' })] }, { ...base, projects: [] })
+  assert.deepEqual([m.projects.length, m.tasks.length], [0, 0])
+}
+// A local reorder survives a remote edit; a locally deleted tag color doesn't come back.
+{
+  const a = blankTask({ id: 'a' }), b = blankTask({ id: 'b' })
+  const base = { tasks: [a, b], projects: [], automations: [], tagColors: { x: '#111', y: '#222' } }
+  const m = rebase(base, { ...base, tasks: [b, a], tagColors: { y: '#222' } }, { ...base, tasks: [{ ...a, title: 'R' }, b] })
+  assert.deepEqual(m.tasks.map(t => t.id + (t.title ?? '')), ['b', 'aR'])
+  assert.deepEqual(m.tagColors, { y: '#222' })
+}
+console.log('rebase ok')

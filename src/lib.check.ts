@@ -34,7 +34,8 @@ const ids = (v: Parameters<typeof blankView>[0]) => viewTasks(blankView({ sort: 
 assert.deepEqual(ids({ projects: ['x'], people: ['ana'], tags: ['dev', 'ui'] }), ['a'])
 assert.deepEqual(ids({ tags: ['dev', 'ui'], tagMode: 'any' }), ['a', 'b'])
 assert.deepEqual(ids({ people: ['bia'] }), ['a2']) // parent isn't hers: the subtask stands alone
-assert.deepEqual(ids({}), ['a', 'b'])
+assert.deepEqual(ids({}), ['a', 'a1', 'a2', 'b']) // a's status isn't its subtasks: the list doesn't nest them, so they stand alone
+assert.deepEqual(ids({ group: 'project' }), ['a', 'b']) // grouped by project, every parent nests its subtasks
 assert.deepEqual(ids({ status: 'done' }), ['c'])
 assert.deepEqual(ids({ due: 'late' }), ['a'])
 assert.deepEqual(ids({ due: 'week' }), ['b'])
@@ -49,3 +50,12 @@ assert.deepEqual(tableDays([2, 3, 4, 5], '2026-11-25'), ['2026-11-24', '2026-11-
 assert.deepEqual(tableDays([2, 3], '2026-11-28'), ['2026-12-01', '2026-12-02']) // sat: next week
 const rep = blankTask({ id: 'r', when: { kind: 'date', date: '2026-11-24' }, recurrence: r({ unit: 'week', weekdays: [2, 4] }) })
 assert.deepEqual(projections([rep]).map(t => t.when!.kind === 'date' && t.when!.date), ['2026-11-26', '2026-12-01', '2026-12-03']) // tue → thu, tue, thu
+
+// A projected repeat moves its deadline along with its date.
+{
+  const { projections, blankTask: bt } = await import('./lib.ts')
+  const t = bt({ id: 'r', when: { kind: 'date', date: '2026-11-24' }, deadline: '2026-11-25',
+    recurrence: { every: 1, unit: 'week', weekdays: [], anchor: 'schedule', until: null } })
+  assert.equal(projections([t], 1)[0].deadline, '2026-12-02')
+  console.log('projections ok')
+}

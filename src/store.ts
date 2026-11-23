@@ -231,26 +231,44 @@ export interface Team { id: string; name: string; color: string; members: { emai
 interface TeamRow { id: string; name: string; color: string; data: Partial<State>; updated_at: string; team_members: Team['members'] }
 type Shared = Pick<State, 'tasks' | 'projects' | 'automations' | 'tagColors' | 'views'>
 
-/** Three-way merge by id: keep what others saved (remote) and replay only what this tab changed since base. */
+/** Three-way merge: keep what others saved (remote) and replay only the fields this tab changed since base. */
 export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
+  const j = (x: unknown) => JSON.stringify(x)
+  // Field by field, so two people editing different fields of one record both keep their edit.
+  const fields = <T extends object>(b: T | undefined, l: T, r: T): T => {
+    if (!b) return l
+    const out = { ...r } as Record<string, unknown>
+    for (const k of new Set([...Object.keys(b), ...Object.keys(l)]) as Set<string>) {
+      const lv = (l as Record<string, unknown>)[k]
+      if (j(lv) === j((b as Record<string, unknown>)[k])) continue
+      if (lv === undefined) delete out[k]; else out[k] = lv
+    }
+    return out as T
+  }
   const list = <T extends { id: string }>(b: T[] = [], l: T[] = [], r: T[] = []) => {
-    const bs = new Map(b.map(x => [x.id, JSON.stringify(x)]))
-    const ls = new Map(l.map(x => [x.id, x]))
-    const changed = (x: T) => bs.get(x.id) !== JSON.stringify(x)
-    const kept = r.flatMap(x => {
+    const bs = new Map(b.map(x => [x.id, x])), ls = new Map(l.map(x => [x.id, x])), rs = new Map(r.map(x => [x.id, x]))
+    const merge = (x: T) => {
       const mine = ls.get(x.id)
       if (!mine) return bs.has(x.id) ? [] : [x] // deleted here, or added remotely
-      return [changed(mine) ? mine : x]
-    })
-    return [...kept, ...l.filter(x => !bs.has(x.id) && !r.some(y => y.id === x.id))]
+      return [fields(bs.get(x.id), mine, x)]
+    }
+    const added = l.filter(x => !bs.has(x.id) && !rs.has(x.id))
+    // Reordered here (and not there): keep this tab's order, with records new from remote at the end.
+    const ids = (xs: T[]) => xs.map(x => x.id).filter(id => bs.has(id))
+    if (j(ids(l)) !== j(ids(b).filter(id => ls.has(id))) && j(ids(r)) === j(ids(b).filter(id => rs.has(id)))) {
+      return [...l.flatMap(x => rs.has(x.id) ? merge(rs.get(x.id)!) : bs.has(x.id) ? [] : [x]), ...r.filter(x => !bs.has(x.id) && !ls.has(x.id))]
+    }
+    return [...r.flatMap(merge), ...added]
   }
-  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+  const projects = list(base.projects, local.projects, remote.projects)
+  // A project deleted on either side takes its tasks along, including ones just added to it on the other.
+  const gone = new Set([...base.projects, ...local.projects, ...remote.projects].map(p => p.id).filter(id => !projects.some(p => p.id === id)))
   return {
-    tasks: list(base.tasks, local.tasks, remote.tasks),
-    projects: list(base.projects, local.projects, remote.projects),
+    tasks: list(base.tasks, local.tasks, remote.tasks).filter(t => !gone.has(t.projectId)),
+    projects,
     automations: list(base.automations, local.automations, remote.automations),
     views: list(base.views, local.views, remote.views),
-    tagColors: same(base.tagColors, local.tagColors) ? remote.tagColors : { ...remote.tagColors, ...local.tagColors },
+    tagColors: fields(base.tagColors ?? {}, local.tagColors ?? {}, remote.tagColors ?? {}),
   }
 }
 
@@ -273,6 +291,7 @@ export function useTeams(me: string) {
   // Last server version per team: base for the merge and for the conditional save.
   const saved = useRef(new Map<string, { json: string; at: string }>())
   const saving = useRef(new Set<string>())
+  const reloadAfterSave = useRef(false)
   const [retry, setRetry] = useState(0)
 
   const load = useCallback(async () => {
@@ -287,6 +306,8 @@ export function useTeams(me: string) {
     setTeams(cur => rows.map(r => {
       const t = toTeam(r, profiles)
       const local = cur.find(x => x.id === t.id)
+      // Mid-save the base is stale: merging now could undo edits made since. Keep local and reload after.
+      if (local && saving.current.has(t.id)) { reloadAfterSave.current = true; return local }
       const base = saved.current.get(t.id)
       saved.current.set(t.id, { json: teamJson(t), at: r.updated_at })
       // Unsaved local edits are replayed on top of the server version, never instead of it.
@@ -319,6 +340,7 @@ export function useTeams(me: string) {
       if (error) console.error(error)
       else if (data.length) saved.current.set(t.id, { json, at })
       else await load()
+      if (reloadAfterSave.current && !saving.current.size) { reloadAfterSave.current = false; await load() }
       setRetry(n => n + 1)
     }), 800)
     return () => clearTimeout(id)

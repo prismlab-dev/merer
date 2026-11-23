@@ -49,7 +49,8 @@ function columns(v: SavedView, tasks: Task[], ctx: Ctx): Col[] {
     }
     case 'tag': {
       const ids = v.tags.length && v.tagMode === 'any' ? v.tags : used(t => t.tags).sort()
-      return many(ids, t => t.tags, id => ({ title: id, mark: <span style={{ color: colorFor(id) }}><Icon name="tag" /></span> }), 'Sem etiqueta')
+      // Tag columns are '@tag', so a tag named "none" can't pass for the untagged column.
+      return many(ids.map(id => '@' + id), t => t.tags.map(x => '@' + x), id => ({ title: id.slice(1), mark: <span style={{ color: colorFor(id.slice(1)) }}><Icon name="tag" /></span> }), 'Sem etiqueta')
     }
     case 'section': {
       const sections = state.projects.find(p => p.id === v.projects[0])?.sections ?? []
@@ -185,7 +186,7 @@ function DayTable({ viewId, days, rows, flip, render }: { viewId: string; days: 
           {days.map(([id, , has]) => {
             // Subtasks already hang under their parent here; elsewhere they still show on their own day.
             const here = c.tasks.filter(has), top = here.filter(t => !here.some(p => p.id === t.parentId))
-            return <div key={id} className={`min-h-0 min-w-0 overflow-hidden border-b border-l border-white/[0.05] space-y-1.5 p-2 ${id === now ? 'bg-iris/[0.04]' : id.length === 10 && [0, 6].includes(parseISO(id).getDay()) ? 'bg-black/15' : ''}`}>{top.map(render)}</div>
+            return <div key={id} className={`min-h-0 min-w-0 overflow-y-auto border-b border-l border-white/[0.05] space-y-1.5 p-2 ${id === now ? 'bg-iris/[0.04]' : id.length === 10 && [0, 6].includes(parseISO(id).getDay()) ? 'bg-black/15' : ''}`}>{top.map(render)}</div>
           })}
         </div>)}
       </div>
@@ -200,7 +201,7 @@ function movePatch(v: SavedView, t: Task, from: string, to: string, ctx: Ctx, ct
   switch (viewGroup(v)) {
     case 'priority': return { priority: Number(to) as Priority }
     case 'section': return { section: none ? null : to }
-    case 'tag': return { tags: swap(t.tags) }
+    case 'tag': return { tags: none ? [] : [...new Set([...t.tags.filter(x => x !== from.slice(1)), to.slice(1)])] }
     // Delegating only works inside the task's own team.
     case 'person': return none || ctxFor(t.projectId).state.people.some(p => p.id === to) ? { assignees: swap(t.assignees) } : null
     // Each space keeps its own tasks, so a card only changes project within the same one; families move from the task itself.
@@ -267,7 +268,7 @@ export function SavedViewPage({ id, ctx: given, ctxFor, team, back, go }: { id: 
     const projectId = group === 'project' ? col : v.projects.length ? v.projects[0] : ctx.wide ? 'inbox' : state.projects[0]?.id
     if (!state.projects.some(p => p.id === projectId) || (person && !ctxFor(projectId).state.people.some(p => p.id === person))) return null
     if (group === 'tag' && col === 'none' && v.tags.length) return null
-    const tags = [...(v.tagMode === 'all' ? v.tags : group === 'tag' ? [] : v.tags.slice(0, 1)), ...(group === 'tag' && col !== 'none' ? [col] : [])]
+    const tags = [...(v.tagMode === 'all' ? v.tags : group === 'tag' ? [] : v.tags.slice(0, 1)), ...(group === 'tag' && col !== 'none' ? [col.slice(1)] : [])]
     const date = group === 'date' ? (col === 'today' ? today() : col === 'tomorrow' ? addDays(today(), 1) : undefined) : v.due === 'today' || v.due === 'week' ? today() : undefined
     return <QuickAdd ctx={ctxFor(projectId)} projectId={projectId} section={group === 'section' && col !== 'none' ? col : undefined} date={date}
       assignees={person ? [person] : []} tags={tags} priority={group === 'priority' ? Number(col) as Priority : v.priorities.length ? Math.max(...v.priorities) as Priority : undefined} />

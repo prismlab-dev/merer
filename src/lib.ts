@@ -165,7 +165,8 @@ export function occurrences(w: When, r: Recurrence, count: number): When[] {
 
 /** The next `n` repeats of open recurring tasks, as read-only copies on their future dates. */
 export const projections = (tasks: Task[], n = 3): Task[] => tasks.flatMap(t => t.recurrence && t.when && !isDone(t.status)
-  ? occurrences(t.when, t.recurrence, n + 1).slice(1).map((when, i) => ({ ...t, id: `${t.id}~${i + 1}`, when, ghostOf: t.id }))
+  ? occurrences(t.when, t.recurrence, n + 1).slice(1).map((when, i) => ({ ...t, id: `${t.id}~${i + 1}`, when, ghostOf: t.id,
+    deadline: t.deadline && addDays(t.deadline, diffDays(span(t.when!)[0], span(when)[0])) }))
   : [])
 
 // ---------- status ----------
@@ -323,11 +324,14 @@ function inView(v: SavedView, t: Task, all: Task[], ref: string) {
 
 /** Tasks of a view, sorted. A subtask steps out on its own only when its parent isn't in the view, unless `flat` (the table, where each sits on its own day). */
 export function viewTasks(v: SavedView, all: Task[], ref = today(), flat = false): Task[] {
+  const g = viewGroup(v), nestAll = g === 'project' || g === 'section' // rows there skip the project, so every parent lists its subtasks
   const hit = all.filter(t => inView(v, t, all, ref))
   const ids = new Set(hit.map(t => t.id))
   const when = (t: Task) => t.when ? span(t.when)[0] + (t.when.kind === 'time' ? t.when.time : t.when.kind === 'slot' ? t.when.from : '99') : '9999'
   const key = (t: Task) => v.sort === 'title' ? t.title.toLowerCase() : v.sort === 'priority' ? t.priority + when(t) : v.sort === 'deadline' ? t.deadline ?? '9999' : when(t) + t.priority
-  return hit.filter(t => flat || !t.parentId || !ids.has(t.parentId)).sort((a, b) => key(a).localeCompare(key(b), 'pt-BR'))
+  // Elsewhere only parents driven by their subtasks list them beneath (see TaskRow), so other subtasks keep their own row.
+  const nests = (id: string) => ids.has(id) && (nestAll || all.find(p => p.id === id)!.status.kind === 'subtasks')
+  return hit.filter(t => flat || !t.parentId || !nests(t.parentId)).sort((a, b) => key(a).localeCompare(key(b), 'pt-BR'))
 }
 
 /** Day bucket of a task, for grouping by date. */
