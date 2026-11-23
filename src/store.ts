@@ -238,10 +238,13 @@ export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
   const fields = <T extends object>(b: T | undefined, l: T, r: T): T => {
     if (!b) return l
     const out = { ...r } as Record<string, unknown>
+    const lr = l as Record<string, unknown>, br = b as Record<string, unknown>
     for (const k of new Set([...Object.keys(b), ...Object.keys(l)]) as Set<string>) {
-      const lv = (l as Record<string, unknown>)[k]
-      if (j(lv) === j((b as Record<string, unknown>)[k])) continue
-      if (lv === undefined) delete out[k]; else out[k] = lv
+      if (j(lr[k]) === j(br[k])) continue
+      // A status and its completion time only make sense together.
+      for (const f of k === 'status' || k === 'completedAt' ? ['status', 'completedAt'] : [k]) {
+        if (lr[f] === undefined) delete out[f]; else out[f] = lr[f]
+      }
     }
     return out as T
   }
@@ -254,8 +257,9 @@ export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
     }
     const added = l.filter(x => !bs.has(x.id) && !rs.has(x.id))
     // Reordered here (and not there): keep this tab's order, with records new from remote at the end.
-    const ids = (xs: T[]) => xs.map(x => x.id).filter(id => bs.has(id))
-    if (j(ids(l)) !== j(ids(b).filter(id => ls.has(id))) && j(ids(r)) === j(ids(b).filter(id => rs.has(id)))) {
+    const ids = (xs: T[]) => xs.map(x => x.id)
+    const kept = (m: Map<string, T>) => ids(b).filter(id => m.has(id))
+    if (j(ids(l)) !== j([...kept(ls), ...ids(added)]) && j(ids(r).filter(id => bs.has(id))) === j(kept(rs))) {
       return [...l.flatMap(x => rs.has(x.id) ? merge(rs.get(x.id)!) : bs.has(x.id) ? [] : [x]), ...r.filter(x => !bs.has(x.id) && !ls.has(x.id))]
     }
     return [...r.flatMap(merge), ...added]
@@ -292,9 +296,11 @@ export function useTeams(me: string) {
   const saved = useRef(new Map<string, { json: string; at: string }>())
   const saving = useRef(new Set<string>())
   const reloadAfterSave = useRef(false)
+  const saves = useRef(0) // finished saves; a load that straddles one read a stale server copy
   const [retry, setRetry] = useState(0)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
+    const seen = saves.current
     const [{ data, error }, who] = await Promise.all([
       supabase.from('teams').select('id, name, color, data, updated_at, team_members(email, role)').order('updated_at'),
       supabase.rpc('member_profiles'), // name + photo from the Silus profile; see supabase/member_profiles.sql
@@ -303,6 +309,7 @@ export function useTeams(me: string) {
     if (who.error) console.error(who.error)
     const profiles: Profiles = new Map((who.data ?? []).map((p: { email: string; name: string | null; photo: string | null }) => [p.email, p]))
     const rows = data as TeamRow[]
+    if (saves.current !== seen) return load()
     setTeams(cur => rows.map(r => {
       const t = toTeam(r, profiles)
       const local = cur.find(x => x.id === t.id)
@@ -337,6 +344,7 @@ export function useTeams(me: string) {
       const { data, error } = await supabase.from('teams').update({ data: JSON.parse(json), updated_at: at })
         .eq('id', t.id).eq('updated_at', saved.current.get(t.id)!.at).select('id')
       saving.current.delete(t.id)
+      saves.current++
       if (error) console.error(error)
       else if (data.length) saved.current.set(t.id, { json, at })
       else await load()

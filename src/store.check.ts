@@ -51,4 +51,14 @@ console.log('store ok')
   assert.deepEqual(m.tasks.map(t => t.id + (t.title ?? '')), ['b', 'aR'])
   assert.deepEqual(m.tagColors, { y: '#222' })
 }
+// Status travels with its completion time; a new task moved to the top stays there.
+{
+  const a = blankTask({ id: 'a', status: { kind: 'progress', value: 0 } })
+  const base = { tasks: [a], projects: [], automations: [] }
+  const done = { ...a, status: { kind: 'progress' as const, value: 100 }, completedAt: 'x' }
+  const m = rebase(base, { ...base, tasks: [{ ...a, status: { kind: 'progress', value: 50 } }] }, { ...base, tasks: [done] })
+  assert.deepEqual([m.tasks[0].status, m.tasks[0].completedAt], [{ kind: 'progress', value: 50 }, null])
+  const n = blankTask({ id: 'n' })
+  assert.deepEqual(rebase(base, { ...base, tasks: [n, a] }, base).tasks.map(t => t.id), ['n', 'a'])
+}
 console.log('rebase ok')

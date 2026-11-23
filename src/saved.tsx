@@ -344,7 +344,7 @@ export function SavedViewPage({ id, ctx: given, ctxFor, team, back, go }: { id: 
     ...days.map((d): DayCol => [d, fmtDay(d), t => onDay(t, d)]),
     ['later', 'Depois', t => !['none', 'late'].includes(dateBucket(t)) && !days.some(d => onDay(t, d))],
     ['none', 'Sem data', t => dateBucket(t) === 'none'],
-  ] as DayCol[]).filter(([id, , has]) => days.includes(id) || tasks.some(has))
+  ] as DayCol[]).filter(([id, , has]) => days.includes(id) || tableTasks.some(has))
   const nothing = <p className="py-4 text-sm text-white/45">Nenhuma tarefa combina com estas regras. Ajuste os filtros em Mais ações, Configurar visualização.</p>
 
   return (

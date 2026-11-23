@@ -330,8 +330,11 @@ export function viewTasks(v: SavedView, all: Task[], ref = today(), flat = false
   const when = (t: Task) => t.when ? span(t.when)[0] + (t.when.kind === 'time' ? t.when.time : t.when.kind === 'slot' ? t.when.from : '99') : '9999'
   const key = (t: Task) => v.sort === 'title' ? t.title.toLowerCase() : v.sort === 'priority' ? t.priority + when(t) : v.sort === 'deadline' ? t.deadline ?? '9999' : when(t) + t.priority
   // Elsewhere only parents driven by their subtasks list them beneath (see TaskRow), so other subtasks keep their own row.
-  const nests = (id: string) => ids.has(id) && (nestAll || all.find(p => p.id === id)!.status.kind === 'subtasks')
-  return hit.filter(t => flat || !t.parentId || !nests(t.parentId)).sort((a, b) => key(a).localeCompare(key(b), 'pt-BR'))
+  const nests = (t: Task) => {
+    const p = ids.has(t.parentId!) && all.find(x => x.id === t.parentId)
+    return !!p && (nestAll || p.status.kind === 'subtasks' && (!t.when || !!p.when && span(t.when)[0] === span(p.when)[0]))
+  }
+  return hit.filter(t => flat || !t.parentId || !nests(t)).sort((a, b) => key(a).localeCompare(key(b), 'pt-BR'))
 }
 
 /** Day bucket of a task, for grouping by date. */
