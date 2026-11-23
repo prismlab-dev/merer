@@ -322,13 +322,16 @@ export function useTeams(me: string) {
     const profiles: Profiles = new Map((who.data ?? []).map((p: { email: string; name: string | null; photo: string | null }) => [p.email, p]))
     const rows = data as TeamRow[]
     if (saves.current !== seen) return load()
+    // Bases are read once, out here: React may run the updater twice, and a second run that saw the
+    // new server copy as its base would take this tab's stale copy for an edit and save it back over it.
+    const bases = new Map(saved.current)
+    for (const r of rows) if (!saving.current.has(r.id)) saved.current.set(r.id, { json: teamJson(toTeam(r, profiles)), at: r.updated_at })
     setTeams(cur => rows.map(r => {
       const t = toTeam(r, profiles)
       const local = cur.find(x => x.id === t.id)
       // Mid-save the base is stale: merging now could undo edits made since. Keep local and reload after.
       if (local && saving.current.has(t.id)) { reloadAfterSave.current = true; return local }
-      const base = saved.current.get(t.id)
-      saved.current.set(t.id, { json: teamJson(t), at: r.updated_at })
+      const base = bases.get(t.id)
       // Unsaved local edits are replayed on top of the server version, never instead of it.
       if (local && base && teamJson(local) !== base.json) return { ...t, data: { ...t.data, ...rebase(JSON.parse(base.json), local.data, t.data) } }
       return t
