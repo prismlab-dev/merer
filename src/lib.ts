@@ -26,6 +26,7 @@ export interface Recurrence {
 
 export interface Task {
   id: string
+  ghostOf?: string // a projected repeat of this task id; never stored
   title: string
   description: string
   projectId: string
@@ -42,6 +43,7 @@ export interface Task {
   dependsOn: string[]
   completedAt: string | null
   completions: number
+  createdBy?: string // email; only stamped on team tasks
 }
 
 // `team` is only set on the merged personal view, so rows can show where a delegated task comes from.
@@ -161,6 +163,12 @@ export function occurrences(w: When, r: Recurrence, count: number): When[] {
   return out
 }
 
+/** The next `n` repeats of open recurring tasks, as read-only copies on their future dates. */
+export const projections = (tasks: Task[], n = 3): Task[] => tasks.flatMap(t => t.recurrence && t.when && !isDone(t.status)
+  ? occurrences(t.when, t.recurrence, n + 1).slice(1).map((when, i) => ({ ...t, id: `${t.id}~${i + 1}`, when, ghostOf: t.id,
+    deadline: t.deadline && addDays(t.deadline, diffDays(span(t.when!)[0], span(when)[0])) }))
+  : [])
+
 // ---------- status ----------
 export function isDone(s: Status) {
   if (s.kind === 'subtasks') return s.total > 0 && s.done >= s.total
@@ -258,6 +266,98 @@ export function blankTask(p: Partial<Task> & { title: string; projectId: string 
 }
 
 export const IN_DAYS: [number | null, string][] = [[0, 'No mesmo dia'], [1, 'No dia seguinte'], [3, 'Em 3 dias'], [7, 'Em 1 semana'], [null, 'Sem data']]
+
+// ---------- saved views ----------
+export type ViewStatus = 'open' | 'moving' | 'blocked' | 'done' | 'all'
+export type ViewDue = 'any' | 'late' | 'today' | 'week' | 'none'
+export type ViewGroup = 'none' | 'section' | 'project' | 'person' | 'tag' | 'priority' | 'date'
+export type ViewSort = 'date' | 'deadline' | 'priority' | 'title'
+/** A filter + layout the user named. Empty lists mean "any"; '' in people means "no assignee". */
+export interface SavedView {
+  id: string
+  name: string
+  status: ViewStatus
+  projects: string[]
+  people: string[]
+  tags: string[]
+  tagMode: 'all' | 'any'
+  priorities: Priority[]
+  due: ViewDue
+  layout: 'list' | 'board' | 'table' // table: rows by group, one column per day
+  group: ViewGroup
+  sort: ViewSort
+  color?: string // icon only; unset follows the first project or tag
+  pinned?: boolean // shown in the sidebar; personal views only
+  projections?: boolean // also show the next repeats of recurring tasks, faded
+  weekdays?: number[] // table only, 0=dom … 6=sáb; unset = the next 7 days
+  flip?: boolean // table only: days as rows, groups as columns
+}
+export const blankView = (p: Partial<SavedView> = {}): SavedView => ({
+  id: 'new', name: '', status: 'open', projects: [], people: [], tags: [], tagMode: 'all', priorities: [], due: 'any', layout: 'list', group: 'none', sort: 'date', ...p,
+})
+
+/** Sections only exist inside one project, a board needs columns, and a table needs rows (its columns are already days). */
+export const viewGroup = (v: SavedView): ViewGroup =>
+  v.group === 'section' && v.projects.length !== 1 ? 'project'
+  : (v.group === 'none' && v.layout !== 'list') || (v.group === 'date' && v.layout === 'table') ? (v.projects.length === 1 ? 'section' : 'project')
+  : v.group
+
+function inView(v: SavedView, t: Task, all: Task[], ref: string) {
+  const done = isDone(t.status)
+  if (v.status === 'done' ? !done : v.status !== 'all' && done) return false
+  if (v.status === 'moving' && progressOf(t.status) === 0) return false
+  if (v.status === 'blocked' && !blockers(t, all).length) return false
+  if (v.projects.length && !v.projects.includes(t.projectId)) return false
+  if (v.people.length && !v.people.some(p => p ? t.assignees.includes(p) : !t.assignees.length)) return false
+  if (v.tags.length && !(v.tagMode === 'all' ? v.tags.every(g => t.tags.includes(g)) : v.tags.some(g => t.tags.includes(g)))) return false
+  if (v.priorities.length && !v.priorities.includes(t.priority)) return false
+  const [s, e] = t.when ? span(t.when) : ['', '']
+  const within = (to: string) => (!!s && s <= to && e >= ref) || (!!t.deadline && t.deadline >= ref && t.deadline <= to)
+  switch (v.due) {
+    case 'any': return true
+    case 'none': return !t.when && !t.deadline
+    case 'late': return (!!e && e < ref) || (!!t.deadline && t.deadline < ref)
+    case 'today': return within(ref)
+    case 'week': return within(addDays(ref, 6))
+  }
+}
+
+/** Tasks of a view, sorted. A subtask steps out on its own only when its parent isn't in the view, unless `flat` (the table, where each sits on its own day). */
+export function viewTasks(v: SavedView, all: Task[], ref = today(), flat = false): Task[] {
+  const g = viewGroup(v), nestAll = g === 'project' || g === 'section' // rows there skip the project, so every parent lists its subtasks
+  const apart = g === 'person' || g === 'tag' || g === 'priority' // a subtask may belong in another group than its parent's
+  const hit = all.filter(t => inView(v, t, all, ref))
+  const ids = new Set(hit.map(t => t.id))
+  const when = (t: Task) => t.when ? span(t.when)[0] + (t.when.kind === 'time' ? t.when.time : t.when.kind === 'slot' ? t.when.from : '99') : '9999'
+  const key = (t: Task) => v.sort === 'title' ? t.title.toLowerCase() : v.sort === 'priority' ? t.priority + when(t) : v.sort === 'deadline' ? t.deadline ?? '9999' : when(t) + t.priority
+  // Elsewhere only parents driven by their subtasks list them beneath (see TaskRow), so other subtasks keep their own row.
+  // Rows nest one level: a subtask of a nested subtask stands alone.
+  const nests = (t: Task): boolean => {
+    const p = ids.has(t.parentId!) && all.find(x => x.id === t.parentId)
+    if (!p || apart || p.parentId && nests(p) || t.projectId !== p.projectId || g === 'section' && t.section !== p.section) return false
+    return (nestAll || p.status.kind === 'subtasks' && (!t.when || !!p.when && span(t.when)[0] === span(p.when)[0]))
+  }
+  return hit.filter(t => flat || !t.parentId || !nests(t)).sort((a, b) => key(a).localeCompare(key(b), 'pt-BR'))
+}
+
+/** Day bucket of a task, for grouping by date. */
+export function dateBucket(t: Task, ref = today()) {
+  const [s, e] = t.when ? span(t.when) : [t.deadline, t.deadline]
+  if (!s || !e) return 'none'
+  return e < ref ? 'late' : s <= ref ? 'today' : s === addDays(ref, 1) ? 'tomorrow' : s <= addDays(ref, 6) ? 'week' : 'later'
+}
+
+/** Days of a table: the next 7, or the picked weekdays of this week (next week once they've all passed). */
+export function tableDays(weekdays: number[] = [], ref = today()): string[] {
+  const week = (from: string) => Array.from({ length: 7 }, (_, i) => addDays(from, i))
+  if (!weekdays.length) return week(ref)
+  const mon = addDays(ref, -((parseISO(ref).getDay() + 6) % 7))
+  const pick = (from: string) => week(from).filter(d => weekdays.includes(parseISO(d).getDay()))
+  return pick(mon).some(d => d >= ref) ? pick(mon) : pick(addDays(mon, 7))
+}
+
+/** Whether a task falls on a day: scheduled across it, or due that day. */
+export const onDay = (t: Task, day: string) => (!!t.when && span(t.when)[0] <= day && span(t.when)[1] >= day) || t.deadline === day
 
 /** Free-form sticky note; the first line reads as its title. */
 export interface Note { id: string; text: string; color: string; pinned: boolean; updatedAt: string }

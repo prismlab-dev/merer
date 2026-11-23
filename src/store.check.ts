@@ -1,7 +1,7 @@
 // Run: npx tsx src/store.check.ts (store imports extensionless modules, so plain node can't load it)
 import assert from 'node:assert/strict'
 import { blankTask, isDone, today } from './lib.ts'
-import { reducer, type State } from './store.ts'
+import { rebase, reducer, type State } from './store.ts'
 
 // Recurring parent with subtask-driven status: finishing the last subtask rolls it and reopens the subtasks.
 const x = blankTask({ id: 'x', status: { kind: 'subtasks', done: 0, total: 0 }, when: { kind: 'date', date: today() },
@@ -19,3 +19,65 @@ assert.equal(get('x').completions, 1)
 assert.deepEqual(get('x').status, { kind: 'subtasks', done: 0, total: 2 })
 assert.ok(!isDone(get('a').status) && !isDone(get('b').status))
 console.log('store ok')
+
+// Team merge: a task created elsewhere survives this tab's pending edit, and local edits/deletes still apply.
+{
+  const a = blankTask({ id: 'a', title: 'A' }), b = blankTask({ id: 'b' })
+  const base = { tasks: [a, b], projects: [], automations: [] }
+  const local = { ...base, tasks: [{ ...a, title: 'A2' }] } // edited a, deleted b
+  const remote = { ...base, tasks: [a, b, blankTask({ id: 'ext' })] } // the script added ext
+  assert.deepEqual(rebase(base, local, remote).tasks.map(t => t.id + (t.title ?? '')), ['aA2', 'ext'])
+}
+
+// Team merge, field by field: two people editing different fields of one task both keep theirs.
+{
+  const a = blankTask({ id: 'a', title: 'A', priority: 4 })
+  const base = { tasks: [a], projects: [], automations: [] }
+  const m = rebase(base, { ...base, tasks: [{ ...a, title: 'A2' }] }, { ...base, tasks: [{ ...a, priority: 1 }] })
+  assert.deepEqual([m.tasks[0].title, m.tasks[0].priority], ['A2', 1])
+}
+// A project deleted remotely takes along a task just added to it here.
+{
+  const p = { id: 'p', name: 'P', color: '#fff', sections: [] } as unknown as State['projects'][number]
+  const base = { tasks: [], projects: [p], automations: [] }
+  const m = rebase(base, { ...base, tasks: [blankTask({ id: 'n', projectId: 'p' })] }, { ...base, projects: [] })
+  assert.deepEqual([m.projects.length, m.tasks.length], [0, 0])
+}
+// A local reorder survives a remote edit; a locally deleted tag color doesn't come back.
+{
+  const a = blankTask({ id: 'a' }), b = blankTask({ id: 'b' })
+  const base = { tasks: [a, b], projects: [], automations: [], tagColors: { x: '#111', y: '#222' } }
+  const m = rebase(base, { ...base, tasks: [b, a], tagColors: { y: '#222' } }, { ...base, tasks: [{ ...a, title: 'R' }, b] })
+  assert.deepEqual(m.tasks.map(t => t.id + (t.title ?? '')), ['b', 'aR'])
+  assert.deepEqual(m.tagColors, { y: '#222' })
+}
+// Status travels with its completion time; a new task moved to the top stays there.
+{
+  const a = blankTask({ id: 'a', status: { kind: 'progress', value: 0 } })
+  const base = { tasks: [a], projects: [], automations: [] }
+  const done = { ...a, status: { kind: 'progress' as const, value: 100 }, completedAt: 'x' }
+  const m = rebase(base, { ...base, tasks: [{ ...a, status: { kind: 'progress', value: 50 } }] }, { ...base, tasks: [done] })
+  assert.deepEqual([m.tasks[0].status, m.tasks[0].completedAt], [{ kind: 'progress', value: 50 }, null])
+  const n = blankTask({ id: 'n' })
+  assert.deepEqual(rebase(base, { ...base, tasks: [n, a] }, base).tasks.map(t => t.id), ['n', 'a'])
+}
+console.log('rebase ok')
+
+// Two people finishing different subtasks: the parent counts both.
+{
+  const p = blankTask({ id: 'p', status: { kind: 'subtasks', done: 0, total: 2 } })
+  const a = blankTask({ id: 'a', parentId: 'p' }), b = blankTask({ id: 'b', parentId: 'p' })
+  const fin = (t: typeof a) => ({ ...t, status: { kind: 'check' as const, done: true }, completedAt: 'x' })
+  const base = { tasks: [p, a, b], projects: [], automations: [] }
+  const m = rebase(base, { ...base, tasks: [{ ...p, status: { kind: 'subtasks', done: 1, total: 2 } }, fin(a), b] },
+    { ...base, tasks: [{ ...p, status: { kind: 'subtasks', done: 1, total: 2 } }, a, fin(b)] })
+  assert.deepEqual(m.tasks.find(t => t.id === 'p')!.status, { kind: 'subtasks', done: 2, total: 2 })
+  // A recurring parent rolls to its next date and reopens its subtasks instead of sitting done.
+  const rp = { ...p, when: { kind: 'date' as const, date: today() }, recurrence: { every: 1, unit: 'week' as const, weekdays: [], anchor: 'schedule' as const, until: null } }
+  const rbase = { ...base, tasks: [rp, a, b] }
+  const half = { ...rp, status: { kind: 'subtasks' as const, done: 1, total: 2 } }
+  const r = rebase(rbase, { ...rbase, tasks: [half, fin(a), b] }, { ...rbase, tasks: [half, a, fin(b)] }).tasks
+  assert.equal(r[0].completions, 1)
+  assert.ok(r.every(t => !isDone(t.status)))
+  console.log('parent recount ok')
+}

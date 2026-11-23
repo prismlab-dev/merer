@@ -33,7 +33,8 @@ function Login() {
     setBusy(false)
     if (error) setError('E-mail ou senha incorretos.')
   }
-  const google = () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin } })
+  // Trailing slash matters: Supabase's "https://host/**" allowlist entries do not match a bare origin.
+  const google = () => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: `${location.origin}/` } })
 
   return (
     <main className="grid min-h-dvh place-items-center bg-canvas px-4">
