@@ -245,6 +245,8 @@ export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
     const lr = l as Record<string, unknown>, br = b as Record<string, unknown>
     for (const k of new Set([...Object.keys(b), ...Object.keys(l)]) as Set<string>) {
       if (j(lr[k]) === j(br[k])) continue
+      // Counters add up: runs on both sides all happened.
+      if (k === 'runs' && typeof lr[k] === 'number') { out[k] = (r as Record<string, number>)[k] + lr[k] - (br[k] as number); continue }
       // A status and its completion time only make sense together.
       for (const f of task && (k === 'status' || k === 'completedAt') ? ['status', 'completedAt'] : [k]) {
         if (lr[f] === undefined) delete out[f]; else out[f] = lr[f]

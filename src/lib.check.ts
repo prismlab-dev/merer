@@ -60,3 +60,10 @@ assert.deepEqual(projections([rep]).map(t => t.when!.kind === 'date' && t.when!.
   assert.equal(projections([t], 1)[0].deadline, '2026-12-02')
   console.log('projections ok')
 }
+
+// Three levels grouped by project: the grandchild stands alone instead of vanishing.
+{
+  const g = [blankTask({ id: 'p', title: 'p', projectId: 'x' }), blankTask({ id: 'c', title: 'c', projectId: 'x', parentId: 'p' }), blankTask({ id: 'gc', title: 'gc', projectId: 'x', parentId: 'c' })]
+  assert.deepEqual(viewTasks(blankView({ group: 'project', sort: 'title' }), g).map(t => t.id), ['gc', 'p'])
+  console.log('grandchild ok')
+}
