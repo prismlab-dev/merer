@@ -62,3 +62,15 @@ console.log('store ok')
   assert.deepEqual(rebase(base, { ...base, tasks: [n, a] }, base).tasks.map(t => t.id), ['n', 'a'])
 }
 console.log('rebase ok')
+
+// Two people finishing different subtasks: the parent counts both.
+{
+  const p = blankTask({ id: 'p', status: { kind: 'subtasks', done: 0, total: 2 } })
+  const a = blankTask({ id: 'a', parentId: 'p' }), b = blankTask({ id: 'b', parentId: 'p' })
+  const fin = (t: typeof a) => ({ ...t, status: { kind: 'check' as const, done: true }, completedAt: 'x' })
+  const base = { tasks: [p, a, b], projects: [], automations: [] }
+  const m = rebase(base, { ...base, tasks: [{ ...p, status: { kind: 'subtasks', done: 1, total: 2 } }, fin(a), b] },
+    { ...base, tasks: [{ ...p, status: { kind: 'subtasks', done: 1, total: 2 } }, a, fin(b)] })
+  assert.deepEqual(m.tasks.find(t => t.id === 'p')!.status, { kind: 'subtasks', done: 2, total: 2 })
+  console.log('parent recount ok')
+}

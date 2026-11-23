@@ -67,11 +67,12 @@ function columns(v: SavedView, tasks: Task[], ctx: Ctx): Col[] {
 
 /** One line per task: status, title, and the time when it has one. A parent lists all its subtasks on a rail beneath it; a subtask on its own day names its parent. */
 /** `group`: what the table's rows are, so the card shows the other side (tags under a project row, the project under a tag row). */
-function TableTask({ task, ctx, under, group }: { task: Task; ctx: Ctx; under?: boolean; group?: ViewGroup }) {
+/** `shown`: tasks in the view; subtasks outside it stay off the rail. */
+function TableTask({ task, ctx, under, group, shown }: { task: Task; ctx: Ctx; under?: boolean; group?: ViewGroup; shown: Set<string> }) {
   const project = group === 'tag' ? ctx.state.projects.find(p => p.id === task.projectId) : undefined
   const tags = group === 'project' || group === 'section' ? task.tags : []
   const parent = !under && task.parentId ? ctx.state.tasks.find(t => t.id === task.parentId) : undefined // its parent isn't in the view
-  const subs = task.ghostOf ? [] : ctx.state.tasks.filter(t => t.parentId === task.id)
+  const subs = task.ghostOf ? [] : ctx.state.tasks.filter(t => t.parentId === task.id && shown.has(t.id))
   const time = task.when?.kind === 'time' ? task.when.time : task.when?.kind === 'slot' ? task.when.from : null
   const done = isDone(task.status)
   const body = <>
@@ -93,7 +94,7 @@ function TableTask({ task, ctx, under, group }: { task: Task; ctx: Ctx; under?: 
       {task.status.kind === 'subtasks' && <span className={`shrink-0 pt-px text-xs tabular-nums ${done ? 'text-white/35' : 'text-white/50'}`}>{task.status.done}/{task.status.total}</span>}
       {time && <span className="shrink-0 pt-px text-xs text-white/40 tabular-nums">{time}</span>}
     </div>
-    {subs.map(s => <TableTask key={s.id} task={s} ctx={ctx} under group={group} />)}
+    {subs.map(s => <TableTask key={s.id} task={s} ctx={ctx} under group={group} shown={shown} />)}
   </>
   // A top-level task is a small tile on the cell, its subtasks inside it.
   return under ? body : <div className={`rounded-xl bg-white/[0.035] p-0.5 shadow-[inset_0_1px_0_rgb(255_255_255/.04),0_6px_14px_-10px_rgba(0,0,0,.8)] ring-1 ring-white/[0.06] transition-colors hover:bg-white/[0.055] ${done ? 'opacity-60' : ''}`}>{body}</div>
@@ -237,6 +238,7 @@ export function SavedViewPage({ id, ctx: given, ctxFor, team, back, go }: { id: 
   const ctx: Ctx = { ...given, oneTeam: spaces.size === 1 && !spaces.has(undefined) }
   const count = `${tasks.length} tarefa${tasks.length === 1 ? '' : 's'}`
   const tableTasks = v.layout === 'table' ? viewTasks(v, state.tasks, undefined, true) : tasks
+  const shown = new Set(tableTasks.map(t => t.id))
   // Projected repeats only where the table has a day for them.
   const shownDays = v.due === 'today' ? [today()] : tableDays(v.weekdays)
   const ghosts = v.layout === 'table' && v.projections ? projections(tableTasks).filter(g => shownDays.some(d => onDay(g, d))) : []
@@ -393,7 +395,7 @@ export function SavedViewPage({ id, ctx: given, ctxFor, team, back, go }: { id: 
           )}
         </Kanban>
       ) : v.layout === 'table' ? (tasks.length ? (
-        <DayTable viewId={v.id} flip={v.flip} days={dayCols} rows={cols.filter(c => c.tasks.length)} render={t => t.ghostOf ? <Ghost key={t.id} task={t} ctx={ctx}><TableTask task={t} ctx={ctx} group={group} /></Ghost> : <TableTask key={t.id} task={t} ctx={ctx} group={group} />} />
+        <DayTable viewId={v.id} flip={v.flip} days={dayCols} rows={cols.filter(c => c.tasks.length)} render={t => t.ghostOf ? <Ghost key={t.id} task={t} ctx={ctx}><TableTask task={t} ctx={ctx} group={group} shown={shown} /></Ghost> : <TableTask key={t.id} task={t} ctx={ctx} group={group} shown={shown} />} />
       ) : nothing) : <>
         {!tasks.length && nothing}
         {group === 'none' || !tasks.length ? <><TaskList tasks={tasks} ctx={ctx} showProject />{group === 'none' && adder('all')}</>

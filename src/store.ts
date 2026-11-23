@@ -235,14 +235,14 @@ type Shared = Pick<State, 'tasks' | 'projects' | 'automations' | 'tagColors' | '
 export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
   const j = (x: unknown) => JSON.stringify(x)
   // Field by field, so two people editing different fields of one record both keep their edit.
-  const fields = <T extends object>(b: T | undefined, l: T, r: T): T => {
+  const fields = <T extends object>(b: T | undefined, l: T, r: T, task = false): T => {
     if (!b) return l
     const out = { ...r } as Record<string, unknown>
     const lr = l as Record<string, unknown>, br = b as Record<string, unknown>
     for (const k of new Set([...Object.keys(b), ...Object.keys(l)]) as Set<string>) {
       if (j(lr[k]) === j(br[k])) continue
       // A status and its completion time only make sense together.
-      for (const f of k === 'status' || k === 'completedAt' ? ['status', 'completedAt'] : [k]) {
+      for (const f of task && (k === 'status' || k === 'completedAt') ? ['status', 'completedAt'] : [k]) {
         if (lr[f] === undefined) delete out[f]; else out[f] = lr[f]
       }
     }
@@ -253,7 +253,7 @@ export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
     const merge = (x: T) => {
       const mine = ls.get(x.id)
       if (!mine) return bs.has(x.id) ? [] : [x] // deleted here, or added remotely
-      return [fields(bs.get(x.id), mine, x)]
+      return [fields(bs.get(x.id), mine, x, 'status' in x)]
     }
     const added = l.filter(x => !bs.has(x.id) && !rs.has(x.id))
     // Reordered here (and not there): keep this tab's order, with records new from remote at the end.
@@ -267,8 +267,15 @@ export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
   const projects = list(base.projects, local.projects, remote.projects)
   // A project deleted on either side takes its tasks along, including ones just added to it on the other.
   const gone = new Set([...base.projects, ...local.projects, ...remote.projects].map(p => p.id).filter(id => !projects.some(p => p.id === id)))
+  // Subtasks finished on both sides: recount their parents from the merged list (just the count, no side effects).
+  const merged = list(base.tasks, local.tasks, remote.tasks).filter(t => !gone.has(t.projectId))
+  const tasks = merged.map(p => {
+    if (p.status.kind !== 'subtasks') return p
+    const subs = merged.filter(t => t.parentId === p.id)
+    return { ...p, status: { ...p.status, done: subs.filter(t => isDone(t.status)).length, total: subs.length } }
+  })
   return {
-    tasks: list(base.tasks, local.tasks, remote.tasks).filter(t => !gone.has(t.projectId)),
+    tasks,
     projects,
     automations: list(base.automations, local.automations, remote.automations),
     views: list(base.views, local.views, remote.views),
