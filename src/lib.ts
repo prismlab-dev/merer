@@ -334,7 +334,8 @@ export function viewTasks(v: SavedView, all: Task[], ref = today(), flat = false
   // Rows nest one level: a subtask of a nested subtask stands alone.
   const nests = (t: Task): boolean => {
     const p = ids.has(t.parentId!) && all.find(x => x.id === t.parentId)
-    return !!p && !apart && !(p.parentId && nests(p)) && (nestAll || p.status.kind === 'subtasks' && (!t.when || !!p.when && span(t.when)[0] === span(p.when)[0]))
+    if (!p || apart || p.parentId && nests(p) || t.projectId !== p.projectId || g === 'section' && t.section !== p.section) return false
+    return (nestAll || p.status.kind === 'subtasks' && (!t.when || !!p.when && span(t.when)[0] === span(p.when)[0]))
   }
   return hit.filter(t => flat || !t.parentId || !nests(t)).sort((a, b) => key(a).localeCompare(key(b), 'pt-BR'))
 }
