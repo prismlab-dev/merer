@@ -325,6 +325,7 @@ function inView(v: SavedView, t: Task, all: Task[], ref: string) {
 /** Tasks of a view, sorted. A subtask steps out on its own only when its parent isn't in the view, unless `flat` (the table, where each sits on its own day). */
 export function viewTasks(v: SavedView, all: Task[], ref = today(), flat = false): Task[] {
   const g = viewGroup(v), nestAll = g === 'project' || g === 'section' // rows there skip the project, so every parent lists its subtasks
+  const apart = g === 'person' || g === 'tag' || g === 'priority' // a subtask may belong in another group than its parent's
   const hit = all.filter(t => inView(v, t, all, ref))
   const ids = new Set(hit.map(t => t.id))
   const when = (t: Task) => t.when ? span(t.when)[0] + (t.when.kind === 'time' ? t.when.time : t.when.kind === 'slot' ? t.when.from : '99') : '9999'
@@ -332,7 +333,7 @@ export function viewTasks(v: SavedView, all: Task[], ref = today(), flat = false
   // Elsewhere only parents driven by their subtasks list them beneath (see TaskRow), so other subtasks keep their own row.
   const nests = (t: Task) => {
     const p = ids.has(t.parentId!) && all.find(x => x.id === t.parentId)
-    return !!p && (nestAll || p.status.kind === 'subtasks' && (!t.when || !!p.when && span(t.when)[0] === span(p.when)[0]))
+    return !!p && !apart && (nestAll || p.status.kind === 'subtasks' && (!t.when || !!p.when && span(t.when)[0] === span(p.when)[0]))
   }
   return hit.filter(t => flat || !t.parentId || !nests(t)).sort((a, b) => key(a).localeCompare(key(b), 'pt-BR'))
 }

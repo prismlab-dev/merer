@@ -36,6 +36,7 @@ assert.deepEqual(ids({ tags: ['dev', 'ui'], tagMode: 'any' }), ['a', 'b'])
 assert.deepEqual(ids({ people: ['bia'] }), ['a2']) // parent isn't hers: the subtask stands alone
 assert.deepEqual(ids({}), ['a', 'a1', 'a2', 'b']) // a's status isn't its subtasks: the list doesn't nest them, so they stand alone
 assert.deepEqual(ids({ group: 'project' }), ['a', 'b']) // grouped by project, every parent nests its subtasks
+assert.deepEqual(ids({ group: 'person', layout: 'board' }), ['a', 'a1', 'a2', 'b']) // by person, a subtask goes to its own person's group
 assert.deepEqual(ids({ status: 'done' }), ['c'])
 assert.deepEqual(ids({ due: 'late' }), ['a'])
 assert.deepEqual(ids({ due: 'week' }), ['b'])

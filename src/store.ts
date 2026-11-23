@@ -58,8 +58,12 @@ function updateTask(s: State, a: Extract<Action, { type: 'update' }>): State {
       ...next, when: moveWhen(next.when, nd), status: resetStatus(next.status),
       deadline: next.deadline && addDays(next.deadline, shift), completions: next.completions + 1,
     }
-    // Subtask-driven status: the next cycle starts with every subtask open again.
-    if (next.status.kind === 'subtasks') tasks = tasks.map(t => (t.parentId === a.id ? { ...t, status: resetStatus(t.status), completedAt: null } : t))
+    // Subtask-driven status: the next cycle starts with every subtask (and theirs) open again.
+    if (next.status.kind === 'subtasks') {
+      const under = new Set([a.id])
+      for (let n = 0; n !== under.size;) { n = under.size; tasks.forEach(t => t.parentId && under.has(t.parentId) && under.add(t.id)) }
+      tasks = tasks.map(t => (t.id !== a.id && under.has(t.id) ? { ...t, status: resetStatus(t.status), completedAt: null } : t))
+    }
     notes.push('Próxima ocorrência agendada')
   } else next.completedAt = new Date().toISOString()
 
@@ -276,7 +280,7 @@ export function rebase(base: Shared, local: Shared, remote: Shared): Shared {
   return {
     tasks: s.tasks,
     projects,
-    automations,
+    automations: s.automations, // with the runs of any the merge set off
     views: list(base.views, local.views, remote.views),
     tagColors: fields(base.tagColors ?? {}, local.tagColors ?? {}, remote.tagColors ?? {}),
   }

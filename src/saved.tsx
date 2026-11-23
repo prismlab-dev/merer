@@ -235,7 +235,7 @@ export function SavedViewPage({ id, ctx: given, ctxFor, team, back, go }: { id: 
   const tasks = viewTasks(v, state.tasks)
   // Only one team's tasks here (none of your own): marking each one as the team's says nothing.
   const spaces = new Set(tasks.map(t => state.projects.find(p => p.id === t.projectId)?.team?.id))
-  const ctx: Ctx = { ...given, oneTeam: spaces.size === 1 && !spaces.has(undefined), only: new Set(viewTasks(v, state.tasks, undefined, true).map(t => t.id)) }
+  const ctx: Ctx = { ...given, oneTeam: spaces.size === 1 && !spaces.has(undefined), only: new Set(viewTasks(v, state.tasks, undefined, true).map(t => t.id).filter(id => !tasks.some(t => t.id === id))) }
   const count = `${tasks.length} tarefa${tasks.length === 1 ? '' : 's'}`
   const tableTasks = v.layout === 'table' ? viewTasks(v, state.tasks, undefined, true) : tasks
   // Projected repeats only where the table has a day for them.

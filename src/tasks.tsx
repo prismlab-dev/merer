@@ -8,7 +8,7 @@ import { DateField, Select, Tip } from './controls'
 import { Sortable, useDrag, useRow } from './sortable'
 import { Avatar, Icon, Meta, PALETTE, projectIcon, PRIORITY, StatusGlyph, btnGhost, btnPrimary, colorFor, priorityOptions, tint, WhenLabel, type IconName } from './ui'
 
-export interface Ctx { state: State; dispatch: Dispatch<Action>; open: (id: string) => void; wide?: boolean; oneTeam?: boolean; only?: Set<string> } // wide: your space plus your teams' tasks, whoever does them (saved views); only: subtasks a saved view lets through
+export interface Ctx { state: State; dispatch: Dispatch<Action>; open: (id: string) => void; wide?: boolean; oneTeam?: boolean; only?: Set<string> } // wide: your space plus your teams' tasks, whoever does them (saved views); only: the subtasks a saved view nests under their parent
 
 const WHEN_ICON: Record<When['kind'], IconName> = { date: 'calendar', time: 'clock', slot: 'clock', window: 'window' }
 
